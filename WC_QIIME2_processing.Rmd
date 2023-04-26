@@ -1,0 +1,255 @@
+---
+title: "WC_QIIME2_processing"
+author: "Jess Diaz"
+date: "2023-04-26"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Step 1: Import sequencing files
+
+In order to properly use the sequencing files in QIIME2, I first need to download all the sequencing files from the Kohl Lab BaseSpace account and upload them into the cluster. Downloading the files was done by Jose (though instructions can be found in Elizabeth's *BaseSpace Protocol* Word Doc) and the files were deposited into the shared OneDrive. I then uploaded these files into the cluster using the ondemand user interface.  
+
+Downloaded files were grouped into folders: one folder for each sample, with two fastq.gz files in each folder (F and R). These files were named after the Kohl Lab/sequencing facility convention, meaning I also had a document that associated those file names with my preferred naming convention for the samples. This is the *Jess_Seq_Name_Tracker_fecal* file.  
+
+To use QIIME2, the files needed to be removed from their individual folders and combined into one directory, preferably with more usable file names. The following code was adapted by an example sent by Elizabeth, and is how I conducted this step.  
+
+```{bash file setup, eval = FALSE}
+# setup: put all sequence folders into one directory, this one is named "seqs"
+# save this as the output directory where the files will ultimately go
+output_dir="/ihome/kkohl/jed213/WhoopingCranes/seqs"
+
+# loop through all the files within all the folders
+# for each one, save a folder name (removes folder name from file name, and changes all dashes to underscore)
+# creates a new file path (output_file) within the output directory with the new file name
+# moves the file
+for file in ./*/*;
+  do folder_name=$(echo "$file" | cut -d \/ -f3 | sed 's/-/_/g');
+  output_file="${output_dir}/${folder_name}";
+  mv -- "$file" "$output_file";
+done
+```
+
+Empty folders can now be removed, and the process of importing the sequences into QIIME2 can proceed.
+
+## Step 2: Generate manifest file
+
+To import the files I needed to have a manifest file which associates each fastq.gz file with a sample name and whether it is a forward or reverse file. Instructions for this were in Elizabeth's *BaseSpace Protocol* Word Doc.  
+The final file name is called *WCFECAL-pe-33-manifest* and saved as a .csv. I then uploaded it to the cluster directory where the sequence files are.
+
+## Using QIIME2 in the cluster
+
+The following code is reference for loading qiime2 in the cluster and running an interactive job.
+
+```{bash cluster setup, eval = FALSE}
+# load qiime2
+module load qiime2/2022.11
+
+# check it's working
+qiime --help
+
+# run interactive job
+srun --pty bash
+
+# submit normal job
+sbatch [job script]
+```
+
+## Step 3: Import samples to QIIME2
+
+Instructions for this were in Elizabeth's *BaseSpace Protocol* Word Doc.
+
+```{bash import to qiime2, eval = FALSE}
+# first, cd to file directory
+# import samples using manifest file
+qiime tools import \
+  --type 'SampleData[PairedEndSequencesWithQuality]' \
+  --input-path WCFECAL-pe-33-manifest.csv \
+  --output-path paired-end-demux.qza \
+  --input-format PairedEndFastqManifestPhred33
+  
+# make sure it ran correctly
+qiime tools peek paired-end-demux.qza
+```
+
+These files have been imported into QIIME2 as Sample Data (paired end with quality info), of the data format SingleLanePerSamplePairedEndFastqDirFmt.
+
+## Step 4: Sequence trimming
+
+Instructions for this were in Elizabeth's *BaseSpace Protocol* Word Doc.  
+
+Now that the sequences have been uploaded into QIIME2 in a useable format, we can look at the sequence length and quality in order to know how to trim the data.  
+
+```{bash visualize quality, eval = FALSE}
+# visualize reads
+qiime demux summarize \
+  --i-data paired-end-demux.qza \
+  --o-visualization paired-end-demux.qzv
+  
+# download .qzv file and view through view.qiime2.org
+```
+
+Based on the sequence quality and the tendencies of this region of the 16S rRNA gene, I trimmed using the following parameters. Note, this step had to be done through a bash script because it took too long with an interactive job. Also it should be run outside the working file directory.
+
+```{bash dada2, eval = FALSE}
+#!/bin/bash
+#SBATCH --partition=htc
+#SBATCH --job-name=dada2
+#SBATCH --output=outs/dada2.out
+#SBATCH --error=errs/dada2.err
+#SBATCH --time=0-10:00:00
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mail-type=END,FAIL
+#SBATCH --mail-user=jed213@pitt.edu
+
+module load qiime2/2022.11
+
+cd WhoopingCranes/seqs
+
+# trim reads based on sequence length and quality
+qiime dada2 denoise-paired \
+  --i-demultiplexed-seqs paired-end-demux.qza \
+  --o-table table.qza \
+  --o-representative-sequences rep-seqs.qza \
+  --p-n-threads 0 \
+  --verbose \
+  --p-trunc-len-f 220 \
+  --p-trunc-len-r 220 \
+  --p-trim-left-f 19 \
+  --p-trim-left-r 20 \
+  --o-denoising-stats denoising-stats.qza
+
+# visualize number of reads that passed each filter at each step
+qiime metadata tabulate \
+  --m-input-file denoising-stats.qza \
+  --o-visualization denoising-stats.qzv
+
+# download .qzv file and view through view.qiime2.org
+```
+
+Running this gives two important file outputs: table.qza and rep-seqs.qza. It also gives a stats output. At this point we can look at stats from this project, and visualize the number of reads that passed each filter at each step.  
+
+## Step 5: Set up metadata file
+
+The next steps will require a QIIME2-compatible metadata file. Instructions on proper format are here https://gregcaporaso.github.io/q2book/using/metadata.html. Note that sample names should be in the exact format as they were in the manifest file. Also, any samples not included here will be discarded from the rest of the analysis (so include only the desired copy of any samples that were sequenced twice, and make sure to include blanks). My file is *fecal_qiime_metadata_corrected.txt*.
+
+## Step 6: Remove samples from sequencing redos
+
+This step was done because many of my samples were sequenced twice due to quality control at the sequencing facility. I used the metadata file to exclude any repeated samples.  
+
+```{bash remove sequence redos, eval = FALSE}
+# remove sample duplicates based on what is in the metadata file
+qiime feature-table filter-samples \
+  --i-table table.qza \
+  --m-metadata-file fecal_qiime_metadata_corrected.txt \
+  --o-filtered-table table-filtered.qza
+```
+
+## More visualization
+
+We can now visualize number of features (reads) per sample. This should match what was in denoising-stats.qzv.
+
+```{bash visualize reads, eval = FALSE}
+# visualize number of features per sample
+qiime feature-table summarize \
+  --i-table table-filtered.qza \
+  --o-visualization table-filtered.qzv \
+  --m-sample-metadata-file fecal_qiime_metadata_corrected.txt
+  
+# download .qzv file and view through view.qiime2.org
+```
+
+We can also look at what the specific sequences were for each feature. Typically not needed.
+
+```{bash visualize sequences, eval = FALSE}
+# visualize sequences for each feature
+qiime feature-table tabulate-seqs \
+  --i-data rep-seqs.qza \
+  --o-visualization rep-seqs.qzv
+
+# download .qzv file and view through view.qiime2.org
+```
+------------------------------------------------------------
+## Step 7: Create phylogenetic trees and classify taxonomy
+
+In order to do other steps, we need a phylogeny for these samples so that we can then assign taxa to the specific features in this dataset. This should also be run through a bash script. Note, this script should be run from outside the main folder, not within it.
+
+```{bash classify, eval = FALSE}
+#!/bin/bash
+#SBATCH --partition=htc
+#SBATCH --job-name=classify
+#SBATCH --output=outs/classify.out
+#SBATCH --error=errs/classify.err
+#SBATCH --time=0-10:00:00
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mail-type=END,FAIL
+#SBATCH --mail-user=jed213@pitt.edu
+
+module load qiime2/2022.11
+
+# create phylogenetic trees
+qiime phylogeny align-to-tree-mafft-fasttree \
+  --i-sequences main/rep-seqs.qza \
+  --o-alignment main/aligned-rep-seqs.qza \
+  --o-masked-alignment main/masked-aligned-rep-seqs.qza \
+  --o-tree main/unrooted-tree.qza \
+  --o-rooted-tree main/rooted-tree.qza
+
+# classify features to taxa according to the Greengenes database
+qiime feature-classifier classify-sklearn \
+  --i-classifier training-feature-classifiers/2022.10.backbone.v4.nb.qza \
+  --i-reads main/rep-seqs.qza \
+  --o-classification main/taxonomy.qza
+
+# visualize each feature associaton with taxa and confidence
+qiime metadata tabulate \
+  --m-input-file main/taxonomy.qza \
+  --o-visualization main/taxonomy.qzv
+  
+# download .qzv file and view through view.qiime2.org
+```
+
+## Step 8: Filter table based on taxonomy
+
+Now that we know the taxonomy associated with each sequence, we can remove any undesired taxa. Specifically, I will remove an reads that are not mapped to a phyla, are mitochondria, are chloroplasts, or are not Bacteria.
+
+```{bash filter taxa, eval = FALSE}
+# filter taxa with no phylum, not bacteria, or are mitochondriaor chloroplasts
+qiime taxa filter-table \
+  --i-table table-filtered.qza \
+  --i-taxonomy taxonomy.qza \
+  --p-include p__,d__Bacteria \
+  --p-exclude mitochondria,chloroplast \
+  --o-filtered-table table-pfilt-no-mitochloro.qza
+```
+
+We can also visualize taxa in each sample (besides being informative, this can help confirm whether this filtering was done correctly).
+
+```{bash visualize taxa, eval = FALSE}
+# create taxa visualization
+qiime taxa barplot \
+  --i-table table-pfilt-no-mitochloro.qza \
+  --i-taxonomy taxonomy.qza \
+  --m-metadata-file fecal_qiime_metadata.txt \
+  --o-visualization taxa-bar-plots.qzv
+  
+# download .qzv file and view through view.qiime2.org
+```
+
+We should also look at read counts again, now that many sequences have been removed through this taxonomic filter.
+
+```{bash re-visualize reads, eval = FALSE}
+# visualize number of reads per sample after removing these taxa
+qiime feature-table summarize \
+  --i-table table-pfilt-no-mitochloro.qza \
+  --o-visualization table-pfilt-no-mitochloro.qzv \
+  --m-sample-metadata-file fecal_qiime_metadata.txt
+```
+
