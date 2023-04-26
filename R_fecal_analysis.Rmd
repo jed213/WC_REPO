@@ -1,0 +1,223 @@
+---
+title: "WC_fecal_analysis"
+author: "Jess Diaz"
+date: "2023-04-03"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: false
+    theme: cosmo
+    highlight: monochrome
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Setup
+```{r load packages, include=FALSE}
+library(qiime2R)
+library(microbiome)
+library(dplyr)
+library(ggplot2)
+library(vegan)
+```
+
+```{r set global parameters, include=FALSE}
+theme_set(theme_classic())
+
+sc <- scale_color_manual(values = c("AR" = "#C34554", 
+                                    "AR-FMT" = "#55B35E", 
+                                    "PR" = "#81B1F7")) 
+```
+
+```{r functions, include=FALSE}
+# calculates values for stats bars for plots
+data.summary <- function(x) {
+  m <- mean(x)
+  ymin <- m-sd(x)
+  ymax <- m+sd(x)
+  return(c(y=m, ymin=ymin, ymax=ymax))
+}
+```
+
+```{r create phyloseq object, include = FALSE}
+setwd("~/Kohl Lab/Whooping Cranes/QIIME processing/qza_files")
+
+# create master phyloseq
+WC <-qza_to_phyloseq(
+  features="table-pfilt-no-mitochloro.qza",
+  tree="rooted-tree.qza",
+  taxonomy="taxonomy.qza",
+  metadata = "fecal_qiime_metadata.txt"
+)
+
+# add factor variables
+# NOTE PROBABLY NEED TO REFORMAT TO DO SUM CONTRASTS
+sample_data(WC)$day_factor <- as.factor(sample_data(WC)$day)
+sample_data(WC)$year_factor <- as.factor(sample_data(WC)$year)
+```
+
+This document is intended for initial analysis of the Whooping Crane fecal sequencing data. There were X # samples spread across X # chicks, 5 years, and 5 timepoints. 3 blanks were included in this analysis, and I still need to confirm with Jose what type of blanks they are (extraction vs PCR) and what samples they are associated with.  
+
+## Data Cleanup and Exploration
+
+```{r data summaries, echo = FALSE}
+# data summaries
+summarize_phyloseq(WC)
+sample_sums(WC)
+```
+
+Based on the read counts, I will rarefy at 8113 to retain all data points. One blank has a very high read count and needs to be separately filtered out for analysis.
+
+```{r rarefy, include=FALSE}
+WC.rare <- rarefy_even_depth(WC, sample.size=8113, rngseed=14, verbose=TRUE) # rarefy
+WC.rare.noblank <- subset_samples(WC.rare, sample.type == "fecal") # remove blanks
+
+# code if I want to subset to years 2019 and 2022, where there were all three groups
+WC.1922 <- subset_samples(WC, year == "2019" | year == "2022")
+```
+
+Next steps: See if I can run decontam and figure out what was in the blanks  
+  - requires making new Sample_or_Control TF column
+  - https://benjjneb.github.io/decontam/vignettes/decontam_intro.html
+
+## Alpha diversity
+
+After rarefying, I can look at the initial alpha diversity plots to look for differences.
+
+```{r alpha all, echo = FALSE}
+plot_richness(WC.rare.noblank, x="group")
+plot_richness(WC.rare.noblank, x="year", color = "group")
+plot_richness(WC.rare.noblank, x="sex")
+plot_richness(WC.rare.noblank, x="day", color="group")
+```
+
+PR might have a slightly higher diversity than other groups? By year, sex, and day it seems pretty similar.
+
+Digging into differences between groups, I can plot diversity per group over time. Removed day 21 for these plots because only one group has any data points at day 21.
+
+```{r alpha dataframe setup, include = FALSE}
+# save alpha diversity calculations as alpha dataframe
+alpha <- microbiome::alpha(WC.rare.noblank)
+
+# save phyloseq metadata as separate object, and add shannon and observed richness
+meta.rare.noblank <- meta(WC.rare.noblank) %>% 
+  mutate(shannon = alpha$diversity_shannon) %>% 
+  mutate(observed = alpha$observed)
+```
+
+Shannon diversity plot:  
+```{r shannon over time, echo = FALSE}
+meta.rare.noblank %>% 
+  filter(day != "21") %>% # remove day 21 samples because only AR had it
+  ggplot(aes(x=day, y=shannon, group = group)) + sc +
+  geom_point(aes(color = group), position = position_dodge(width = 2), shape = 1, size = 3) +
+  stat_summary(fun=mean, geom = "line", linewidth = 1, aes(color = group)) +
+  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 2, na.rm = TRUE, aes(color = group)) +
+  stat_summary(fun=mean, geom = "point", size = 3, aes(color = group)) +
+  theme_classic(base_size = 15) +
+  ylab("shannon diversity")
+```
+
+Observed richness plot:  
+```{r richness over time, echo = FALSE}
+meta.rare.noblank %>% 
+  filter(day != "21") %>% 
+  ggplot(aes(x=day, y=observed, group = group)) + sc +
+  geom_point(aes(color = group), position = position_dodge(width = 2), shape = 1, size = 3) +
+  stat_summary(fun=mean, geom = "line", linewidth = 1, aes(color = group)) +
+  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 2, na.rm = TRUE, aes(color = group)) +
+  stat_summary(fun=mean, geom = "point", size = 3, aes(color = group)) +
+  theme_classic(base_size = 15) +
+  ylab("observed richness")
+```
+
+Seems like potentially, richness converges over time between the three groups.  
+
+NEXT STEPS: Need to do stats to see whether these are actually converging (start with linear model?)
+
+```{r extra code for richness over time, include = FALSE}
+# these plots were generated for my rotation talk, to add in data sequentially
+
+# observed richness but no AR-FMT group
+meta.rare.noblank %>% 
+  filter(day != "21") %>% 
+  ggplot(aes(x=day, y=observed, group = group, alpha = group)) + sc +
+  scale_alpha_manual(values = c(1, 0, 1)) +
+  geom_point(aes(color = group), position = position_dodge(width = 2), shape = 1, size = 3) +
+  stat_summary(fun=mean, geom = "line", linewidth = 1, aes(color = group)) +
+  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 2, na.rm = TRUE, aes(color = group)) +
+  stat_summary(fun=mean, geom = "point", size = 3, aes(color = group)) +
+  theme_classic(base_size = 15) +
+  ylab("observed richness")
+
+# observed richness but no AR-or AR groups
+meta.rare.noblank %>% 
+  filter(day != "21") %>% 
+  ggplot(aes(x=day, y=observed, group = group, alpha = group)) + sc +
+  scale_alpha_manual(values = c(0, 0, 1)) +
+  geom_point(aes(color = group), position = position_dodge(width = 2), shape = 1, size = 3) +
+  stat_summary(fun=mean, geom = "line", linewidth = 1, aes(color = group)) +
+  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 2, na.rm = TRUE, aes(color = group)) +
+  stat_summary(fun=mean, geom = "point", size = 3, aes(color = group)) +
+  theme_classic(base_size = 15) +
+  ylab("observed richness")
+```
+
+## Beta diversity
+
+I will do some initial beta diversity plots to look for clustering patterns.
+
+```{r bray curtis setup, include = FALSE}
+# no blanks or day 21
+WC.rare.noblank.no21 <- subset_samples(WC.rare.noblank, day_factor != "21") # remove day 21 from phyloseq
+BrayDist.noblank.no21 <- distance(WC.rare.noblank.no21, method = "bray") # create bray dist matrix
+BrayOrd.noblank.no21 <- ordinate(WC.rare.noblank.no21, "NMDS", distance = BrayDist.noblank.no21) # make NMDS ordination
+BrayPlot.noblank.no21 <- plot_ordination(WC.rare.noblank.no21, BrayOrd.noblank.no21, justDF = TRUE) # make base NMDS plot
+```
+
+Bray Curtis by group:  
+```{r bray by group, echo = FALSE}
+# just group
+BrayPlot.noblank.no21 %>% 
+  ggplot(aes(x=NMDS1, y=NMDS2)) + sc +
+  geom_point(size=4, aes(color = group)) +
+  labs(shape = "day")
+```
+
+Adding day as shape:  
+```{r bray by group and day, echo = FALSE}
+BrayPlot.noblank.no21 %>% 
+  ggplot(aes(x=NMDS1, y=NMDS2)) + sc +
+  geom_point(size=4, aes(color = group, shape = day_factor)) +
+  labs(shape = "day")
+```
+
+I get the sense here too that beta diversity seems to be converging over time.
+
+```{r extra code for bray by group, include = FALSE}
+# these plots were generated for my rotation talk, to add in data sequentially
+
+# by group but only PR and AR groups
+BrayPlot.noblank.no21 %>% 
+  ggplot(aes(x=NMDS1, y=NMDS2, alpha = group)) + sc +
+  scale_alpha_manual(values = c(1, 0, 1)) +
+  geom_point(size=4, aes(color = group)) +
+  labs(shape = "day")
+
+# by group but only PR groups
+BrayPlot.noblank.no21 %>% 
+  ggplot(aes(x=NMDS1, y=NMDS2, alpha = group)) + sc +
+  scale_alpha_manual(values = c(0, 0, 1)) +
+  geom_point(size=4, aes(color = group)) +
+  labs(shape = "day")
+```
+
+NEXT STEPS:  
+
+* proper beta dispersion analysis
+* statistical analysis (compare group means/direction with adonis + post hoc pairwise comparisons (maybe adonis with multiple variables?))
+
+
