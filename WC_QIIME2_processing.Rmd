@@ -174,7 +174,7 @@ qiime feature-table tabulate-seqs \
 
 # download .qzv file and view through view.qiime2.org
 ```
-------------------------------------------------------------
+
 ## Step 7: Create phylogenetic trees and classify taxonomy
 
 In order to do other steps, we need a phylogeny for these samples so that we can then assign taxa to the specific features in this dataset. This should also be run through a bash script. Note, this script should be run from outside the main folder, not within it.
@@ -221,13 +221,13 @@ qiime metadata tabulate \
 Now that we know the taxonomy associated with each sequence, we can remove any undesired taxa. Specifically, I will remove an reads that are not mapped to a phyla, are mitochondria, are chloroplasts, or are not Bacteria.
 
 ```{bash filter taxa, eval = FALSE}
-# filter taxa with no phylum, not bacteria, or are mitochondriaor chloroplasts
+# filter taxa with no phylum, not bacteria, or are mitochondria or chloroplasts
 qiime taxa filter-table \
   --i-table table-filtered.qza \
   --i-taxonomy taxonomy.qza \
-  --p-include p__,d__Bacteria \
-  --p-exclude mitochondria,chloroplast \
-  --o-filtered-table table-pfilt-no-mitochloro.qza
+  --p-include p__ \
+  --p-exclude mitochondria,chloroplast,archaea \
+  --o-filtered-table table-filt-bytaxa.qza
 ```
 
 We can also visualize taxa in each sample (besides being informative, this can help confirm whether this filtering was done correctly).
@@ -235,9 +235,9 @@ We can also visualize taxa in each sample (besides being informative, this can h
 ```{bash visualize taxa, eval = FALSE}
 # create taxa visualization
 qiime taxa barplot \
-  --i-table table-pfilt-no-mitochloro.qza \
+  --i-table table-filt-bytaxa.qza \
   --i-taxonomy taxonomy.qza \
-  --m-metadata-file fecal_qiime_metadata.txt \
+  --m-metadata-file fecal_qiime_metadata_corrected.txt \
   --o-visualization taxa-bar-plots.qzv
   
 # download .qzv file and view through view.qiime2.org
@@ -248,8 +248,9 @@ We should also look at read counts again, now that many sequences have been remo
 ```{bash re-visualize reads, eval = FALSE}
 # visualize number of reads per sample after removing these taxa
 qiime feature-table summarize \
-  --i-table table-pfilt-no-mitochloro.qza \
-  --o-visualization table-pfilt-no-mitochloro.qzv \
-  --m-sample-metadata-file fecal_qiime_metadata.txt
+  --i-table table-filt-bytaxa.qza \
+  --o-visualization table-filt-bytaxa.qzv \
+  --m-sample-metadata-file fecal_qiime_metadata_corrected.txt
 ```
 
+Now the files can be imported into R for analysis. I will need the taxonomy.qza, table-filt-bytaxa.qza, rep-seqs.qza, and fecal_qiime_metadata_corrected.txt.
