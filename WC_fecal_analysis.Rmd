@@ -47,10 +47,10 @@ setwd("~/Kohl Lab/Whooping Cranes/QIIME processing/qza_files")
 
 # create master phyloseq
 WC <-qza_to_phyloseq(
-  features="table-pfilt-no-mitochloro.qza",
+  features="table-filt-bytaxa.qza",
   tree="rooted-tree.qza",
   taxonomy="taxonomy.qza",
-  metadata = "fecal_qiime_metadata.txt"
+  metadata = "fecal_qiime_metadata_corrected.txt"
 )
 
 # add factor variables
