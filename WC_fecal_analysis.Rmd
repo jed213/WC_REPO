@@ -43,8 +43,6 @@ data.summary <- function(x) {
 ```
 
 ```{r create phyloseq object, include = FALSE}
-setwd("~/Kohl Lab/Whooping Cranes/QIIME processing/qza_files")
-
 # create master phyloseq
 WC <-qza_to_phyloseq(
   features="table-filt-bytaxa.qza",
@@ -59,7 +57,7 @@ sample_data(WC)$day_factor <- as.factor(sample_data(WC)$day)
 sample_data(WC)$year_factor <- as.factor(sample_data(WC)$year)
 ```
 
-This document is intended for initial analysis of the Whooping Crane fecal sequencing data. There were X # samples spread across X # chicks, 5 years, and 5 timepoints. 3 blanks were included in this analysis, and I still need to confirm with Jose what type of blanks they are (extraction vs PCR) and what samples they are associated with.  
+This document is intended for initial analysis of the Whooping Crane fecal sequencing data. Included in this analysis are X # samples spread across 34 chicks, 5 years, and 5 timepoints. 3 blanks were included in this analysis, and I still need to confirm with Jose what type of blanks they are (extraction vs PCR) and what samples they are associated with.  
 
 ## Data Cleanup and Exploration
 
@@ -69,7 +67,7 @@ summarize_phyloseq(WC)
 sample_sums(WC)
 ```
 
-Based on the read counts, I will rarefy at 8113 to retain all data points. One blank has a very high read count and needs to be separately filtered out for analysis.
+Based on the read counts, I will rarefy at 8113 to retain all data points except the three that had below 1000 reads (hopefully will get resequenced). One blank (Blank-5) has a very high read count and needs to be separately filtered out for analysis.
 
 ```{r rarefy, include=FALSE}
 WC.rare <- rarefy_even_depth(WC, sample.size=8113, rngseed=14, verbose=TRUE) # rarefy
@@ -219,5 +217,6 @@ NEXT STEPS:
 
 * proper beta dispersion analysis
 * statistical analysis (compare group means/direction with adonis + post hoc pairwise comparisons (maybe adonis with multiple variables?))
+* trajectory of change in each bird over time?
 
 
