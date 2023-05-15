@@ -253,4 +253,4 @@ qiime feature-table summarize \
   --m-sample-metadata-file fecal_qiime_metadata_corrected.txt
 ```
 
-Now the files can be imported into R for analysis. I will need the taxonomy.qza, table-filt-bytaxa.qza, rep-seqs.qza, and fecal_qiime_metadata_corrected.txt.
+Now the files can be imported into R for analysis. I will need the taxonomy.qza, table-filt-bytaxa.qza, rooted-tree.qza, and fecal_qiime_metadata_corrected.txt.

@@ -22,6 +22,8 @@ library(microbiome)
 library(dplyr)
 library(ggplot2)
 library(vegan)
+library(decontam)
+source("HighstatLibV10.R")
 ```
 
 ```{r set global parameters, include=FALSE}
@@ -51,45 +53,71 @@ WC <-qza_to_phyloseq(
   metadata = "fecal_qiime_metadata_corrected.txt"
 )
 
-# add factor variables
-# NOTE PROBABLY NEED TO REFORMAT TO DO SUM CONTRASTS
-sample_data(WC)$day_factor <- as.factor(sample_data(WC)$day)
-sample_data(WC)$year_factor <- as.factor(sample_data(WC)$year)
+# sum contrasts for categorical variables
+sample_data(WC)$day <- C(factor(sample_data(WC)$day), sum)
+sample_data(WC)$year <- C(factor(sample_data(WC)$year), sum)
+sample_data(WC)$group <- C(factor(sample_data(WC)$group), sum)
+sample_data(WC)$bird.code <- C(factor(sample_data(WC)$bird.code), sum)
+sample_data(WC)$sex <- C(factor(sample_data(WC)$sex), sum)
+
+# remove blank 5 (not from my study)
+WC <- subset_samples(WC, bird.code != "Blank-5")
 ```
 
-This document is intended for initial analysis of the Whooping Crane fecal sequencing data. Included in this analysis are X # samples spread across 34 chicks, 5 years, and 5 timepoints. 3 blanks were included in this analysis, and I still need to confirm with Jose what type of blanks they are (extraction vs PCR) and what samples they are associated with.  
+This document is intended for initial analysis of the Whooping Crane fecal sequencing data. Included in this analysis are X # samples spread across 34 chicks, 5 years, and 5 timepoints. 2 extraction blanks were included in this analysis, as well as several PCR blanks which are not included here (Jose is checking that they are clean).  
 
 ## Data Cleanup and Exploration
 
-```{r data summaries, echo = FALSE}
+```{r data summaries, echo = FALSE, warnings = FALSE}
 # data summaries
 summarize_phyloseq(WC)
-sample_sums(WC)
 ```
 
-Based on the read counts, I will rarefy at 8113 to retain all data points except the three that had below 1000 reads (hopefully will get resequenced). One blank (Blank-5) has a very high read count and needs to be separately filtered out for analysis.
+First I will use the extraction blanks to identify contaminants.
+
+```{r decontam, echo = FALSE}
+# make new variable where blanks are "TRUE"
+sample_data(WC)$is.neg <- sample_data(WC)$sample.type == "blank"
+
+# run decontam
+contamdf.prevalence <- isContaminant(WC, method="prevalence", neg="is.neg", threshold=0.5)
+
+# identify which taxa are contaminants
+table(contamdf.prevalence$contaminant)
+contams <- which(contamdf.prevalence$contaminant)
+
+# list contaminants
+tax <- as(tax_table(WC), "matrix")
+tax[contams,]
+
+# remove taxa from phyloseq
+WC.decontam <- prune_taxa(!contamdf.prevalence$contaminant, WC)
+```
+
+11 taxa were identified as contaminants using a threshold where the taxa have to be more prevalent in the negatives than in the samples. I have removed these taxa from analysis.
+
+Now I can look at the read counts to see how many reads are left in each sample.
+```{r}
+sample_sums(WC.decontam)
+```
+Based on the read counts, I will rarefy at 8113 to retain all data points except the three that had below 1000 reads (hopefully will get resequenced). Blanks should be automatically removed with the rarefaction.
 
 ```{r rarefy, include=FALSE}
-WC.rare <- rarefy_even_depth(WC, sample.size=8113, rngseed=14, verbose=TRUE) # rarefy
-WC.rare.noblank <- subset_samples(WC.rare, sample.type == "fecal") # remove blanks
+WC.rare <- rarefy_even_depth(WC.decontam, sample.size=8113, rngseed=14, verbose=TRUE) # rarefy
 
 # code if I want to subset to years 2019 and 2022, where there were all three groups
-WC.1922 <- subset_samples(WC, year == "2019" | year == "2022")
+#WC.1922 <- subset_samples(WC.decontam, year == "2019" | year == "2022")
 ```
-
-Next steps: See if I can run decontam and figure out what was in the blanks  
-  - requires making new Sample_or_Control TF column
-  - https://benjjneb.github.io/decontam/vignettes/decontam_intro.html
 
 ## Alpha diversity
 
 After rarefying, I can look at the initial alpha diversity plots to look for differences.
 
 ```{r alpha all, echo = FALSE}
-plot_richness(WC.rare.noblank, x="group")
-plot_richness(WC.rare.noblank, x="year", color = "group")
-plot_richness(WC.rare.noblank, x="sex")
-plot_richness(WC.rare.noblank, x="day", color="group")
+plot_richness(WC.rare, x="group")
+plot_richness(WC.rare, x="year", color = "group")
+plot_richness(WC.rare, x="sex")
+plot_richness(WC.rare, x="day", color="group")
 ```
 
 PR might have a slightly higher diversity than other groups? By year, sex, and day it seems pretty similar.
@@ -164,6 +192,38 @@ meta.rare.noblank %>%
   ylab("observed richness")
 ```
 
+### Statistics
+First, I am comparing the differences in richness between AR and PR chicks at 14 days.
+```{r Wilcox-Mann-Whitney for ZYMO grant, echo = FALSE}
+# filter table to isolate day 14 AR and PR
+meta.rare.d14.noFMT <- meta.rare.noblank %>% 
+  filter(day == "14") %>%
+  filter(group != "AR-FMT") %>% 
+  mutate(day = as.factor(day)) %>% 
+  mutate(group = as.factor(group))
+
+# compare means
+wilcox.test(observed ~ group, data=meta.rare.d14.noFMT)
+coin::wilcox_test(observed ~ group, data=meta.rare.d14.noFMT)
+```
+### Statistics: Modeling
+I am constructing a model to detect the factors influencing alpha diversity in these Whooping Crane samples. The potential explanatory factors I have are: Individual bird, year, sex, day, and group.  
+
+First I will make a pairs plot.
+```{r pairs, warnings = FALSE, echo = FALSE}
+# Make pairs plot
+meta.forpairs <- meta.rare.noblank %>% 
+  select(-bird.name, -sample.type, -date.collected, -date.extracted, -sample.weight, -extraction.id, -ng.uL, -A260.280, -day, -year) %>% 
+  mutate(bird.code = as.factor(bird.code)) %>% 
+  mutate(sex = as.factor(sex)) %>% 
+  mutate(group = as.factor(group)) %>% 
+  filter(day_factor != "21")
+pairs(meta.forpairs, lower.panel=panel.smooth, diag.panel=panel.hist,
+      upper.panel=panel.cor)
+```
+The shannon plot looks more even so I will use that one for analysis. I will not look for collinearity since all of my explanatory variables are categorical.
+
+
 ## Beta diversity
 
 I will do some initial beta diversity plots to look for clustering patterns.
@@ -212,11 +272,20 @@ BrayPlot.noblank.no21 %>%
   geom_point(size=4, aes(color = group)) +
   labs(shape = "day")
 ```
-
 NEXT STEPS:  
 
 * proper beta dispersion analysis
 * statistical analysis (compare group means/direction with adonis + post hoc pairwise comparisons (maybe adonis with multiple variables?))
 * trajectory of change in each bird over time?
+
+### Statistics
+
+First I want to see if PERMANOVA identifies whether the composition is significant by group.
+```{r}
+adonis2(BrayDist.noblank.no21 ~ group, data = meta(WC.rare.noblank.no21))
+```
+
+
+
 
 
