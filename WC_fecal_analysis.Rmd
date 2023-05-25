@@ -1,14 +1,9 @@
 ---
-title: "WC_fecal_analysis"
+title: "Whooping Crane data analysis: Fecal Samples"
 author: "Jess Diaz"
 date: "2023-04-03"
 output:
-  html_document:
-    toc: true
-    toc_float: true
-    number_sections: false
-    theme: cosmo
-    highlight: monochrome
+  rmdformats::readthedown
 ---
 
 ```{r setup, include=FALSE}
@@ -23,6 +18,8 @@ library(dplyr)
 library(ggplot2)
 library(vegan)
 library(decontam)
+library(nlme)
+library(rmdformats)
 source("HighstatLibV10.R")
 ```
 
@@ -64,18 +61,20 @@ sample_data(WC)$sex <- C(factor(sample_data(WC)$sex), sum)
 WC <- subset_samples(WC, bird.code != "Blank-5")
 ```
 
-This document is intended for initial analysis of the Whooping Crane fecal sequencing data. Included in this analysis are X # samples spread across 34 chicks, 5 years, and 5 timepoints. 2 extraction blanks were included in this analysis, as well as several PCR blanks which are not included here (Jose is checking that they are clean).  
+This document is intended for initial analysis of the Whooping Crane fecal sequencing data. Included in this analysis are 122 samples spread across 34 chicks, 5 years, and 5 timepoints. 2 extraction blanks were included in this analysis, as well as several PCR blanks which are not included here (Jose is making sure that they look clean).  
 
-## Data Cleanup and Exploration
+## Data Cleanup and Setup
 
+### Data Summary
 ```{r data summaries, echo = FALSE, warnings = FALSE}
 # data summaries
 summarize_phyloseq(WC)
 ```
+### Decontam
 
-First I will use the extraction blanks to identify contaminants.
+First I will use the extraction blanks to identify contaminants. Using a threshold of 0.5, these are the taxa identified as contaminants:
 
-```{r decontam, echo = FALSE}
+```{r decontam 0.5, echo = FALSE}
 # make new variable where blanks are "TRUE"
 sample_data(WC)$is.neg <- sample_data(WC)$sample.type == "blank"
 
@@ -89,24 +88,83 @@ contams <- which(contamdf.prevalence$contaminant)
 # list contaminants
 tax <- as(tax_table(WC), "matrix")
 tax[contams,]
+```
+I will also make a plot that shows prevalence in the negatives and in true samples, to check how they are getting classified.  
+```{r decontam plot, echo = FALSE}
+# presence-absence phyloseq for controls and samples
+ps.pa <- transform_sample_counts(WC, function(abund) 1*(abund>0))
+ps.pa.neg <- prune_samples(sample_data(ps.pa)$sample.type == "blank", ps.pa)
+ps.pa.pos <- prune_samples(sample_data(ps.pa)$sample.type == "fecal", ps.pa)
 
-# remove taxa from phyloseq
-WC.decontam <- prune_taxa(!contamdf.prevalence$contaminant, WC)
+# make dataframe for prevalence
+df.pa <- data.frame(pa.pos=taxa_sums(ps.pa.pos), pa.neg=taxa_sums(ps.pa.neg),
+                    contaminant=contamdf.prevalence$contaminant)
+ggplot(data=df.pa, aes(x=pa.neg, y=pa.pos, color=contaminant)) +
+  geom_point() +
+  xlab("Prevalence (blanks)") +
+  ylab("Prevalence (samples)") +
+  ggtitle("Threshold = 0.5") +
+  geom_abline(slope = 1, intercept = 0)
 ```
 
-11 taxa were identified as contaminants using a threshold where the taxa have to be more prevalent in the negatives than in the samples. I have removed these taxa from analysis.
+I am not happy with how this identified contaminants. There are some that are still present in a very large number of samples and were only found in one contaminant, and one that was found in a contaminant but not many samples and was not identified as a contaminant. I am going to try lowering the strict threshold of 0.5 to 0.1 to see if that keeps some of these samples.  
+```{r decontam 0.1, echo = FALSE}
+# run decontam
+contamdf.prevalence <- isContaminant(WC, method="prevalence", neg="is.neg", threshold=0.1)
+
+# identify which taxa are contaminants
+table(contamdf.prevalence$contaminant)
+contams <- which(contamdf.prevalence$contaminant)
+
+# list contaminants
+tax <- as(tax_table(WC), "matrix")
+tax[contams,]
+
+# presence-absence phyloseq for controls and samples
+ps.pa <- transform_sample_counts(WC, function(abund) 1*(abund>0))
+ps.pa.neg <- prune_samples(sample_data(ps.pa)$sample.type == "blank", ps.pa)
+ps.pa.pos <- prune_samples(sample_data(ps.pa)$sample.type == "fecal", ps.pa)
+
+# make dataframe for prevalence
+df.pa <- data.frame(pa.pos=taxa_sums(ps.pa.pos), pa.neg=taxa_sums(ps.pa.neg),
+                    contaminant=contamdf.prevalence$contaminant)
+ggplot(data=df.pa, aes(x=pa.neg, y=pa.pos, color=contaminant)) +
+  geom_point() +
+  xlab("Prevalence (blanks)") +
+  ylab("Prevalence (samples)") +
+  ggtitle("Threshold = 0.1") +
+  geom_abline(slope = 1, intercept = 0)
+```
+These make a bit more sense as contaminants. Now I just want to make sure that I am not removing too many samples by removing these contaminants. This table shows % of reads removed from that sample after removing contaminants.  
+```{r remove contaminants, echo = FALSE}
+# remove taxa from phyloseq
+WC.decontam <- prune_taxa(!contamdf.prevalence$contaminant, WC)
+
+# set up df with readcounts and % removed
+readcounts <- data.frame(matrix(ncol = 0, nrow = 124))
+readcounts$pre <- as.data.frame(sample_sums(WC))
+readcounts$post <- sample_sums(WC.decontam)
+readcounts$per.removed <- ((readcounts$pre - readcounts$post)/readcounts$pre) *100
+
+print(readcounts$per.removed)
+
+# print otu table for contaminants
+as.data.frame(otu_table(WC)) %>% slice(contams)
+```
+These look ok to me. Though some of them have higher read counts than in the blanks, they are only in a few samples, and the blanks had much lower reads overall so that would skew the number. Something else I could do would be to compare which blanks were extracted with which samples, which would give me a better idea if they may be true extraction contaminants or not.  
+
+6 taxa were identified as contaminants using a threshold of 0.1 (would be a good idea for me to articulate what this threshold means). I have removed these taxa from analysis.
+
+### Rarefaction
 
 Now I can look at the read counts to see how many reads are left in each sample.
-```{r}
+```{r read counts, echo = FALSE}
 sample_sums(WC.decontam)
 ```
 Based on the read counts, I will rarefy at 8113 to retain all data points except the three that had below 1000 reads (hopefully will get resequenced). Blanks should be automatically removed with the rarefaction.
 
 ```{r rarefy, include=FALSE}
 WC.rare <- rarefy_even_depth(WC.decontam, sample.size=8113, rngseed=14, verbose=TRUE) # rarefy
-
-# code if I want to subset to years 2019 and 2022, where there were all three groups
-#WC.1922 <- subset_samples(WC.decontam, year == "2019" | year == "2022")
 ```
 
 ## Alpha diversity
@@ -120,28 +178,28 @@ plot_richness(WC.rare, x="sex")
 plot_richness(WC.rare, x="day", color="group")
 ```
 
-PR might have a slightly higher diversity than other groups? By year, sex, and day it seems pretty similar.
+Some trends I see: PR might have slightly higher diversity than other groups, and the green AR-FMT points seem to be a bit lower. Something is definitely going on with day 14.  
 
-Digging into differences between groups, I can plot diversity per group over time. Removed day 21 for these plots because only one group has any data points at day 21.
+Digging into differences between groups, I can plot diversity per group over time. I removed day 21 for these plots because only one group has any data points at day 21.
 
 ```{r alpha dataframe setup, include = FALSE}
 # save alpha diversity calculations as alpha dataframe
-alpha <- microbiome::alpha(WC.rare.noblank)
+alpha <- microbiome::alpha(WC.rare)
 
 # save phyloseq metadata as separate object, and add shannon and observed richness
-meta.rare.noblank <- meta(WC.rare.noblank) %>% 
-  mutate(shannon = alpha$diversity_shannon) %>% 
+meta.rare <- meta(WC.rare) %>%
+  mutate(shannon = alpha$diversity_shannon) %>%
   mutate(observed = alpha$observed)
 ```
 
 Shannon diversity plot:  
 ```{r shannon over time, echo = FALSE}
-meta.rare.noblank %>% 
+meta.rare %>%
   filter(day != "21") %>% # remove day 21 samples because only AR had it
   ggplot(aes(x=day, y=shannon, group = group)) + sc +
-  geom_point(aes(color = group), position = position_dodge(width = 2), shape = 1, size = 3) +
+  geom_point(aes(color = group), position = position_dodge(width = 0.1), shape = 1, size = 3) +
   stat_summary(fun=mean, geom = "line", linewidth = 1, aes(color = group)) +
-  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 2, na.rm = TRUE, aes(color = group)) +
+  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 0.5, na.rm = TRUE, aes(color = group)) +
   stat_summary(fun=mean, geom = "point", size = 3, aes(color = group)) +
   theme_classic(base_size = 15) +
   ylab("shannon diversity")
@@ -149,12 +207,12 @@ meta.rare.noblank %>%
 
 Observed richness plot:  
 ```{r richness over time, echo = FALSE}
-meta.rare.noblank %>% 
-  filter(day != "21") %>% 
+meta.rare %>%
+  filter(day != "21") %>%
   ggplot(aes(x=day, y=observed, group = group)) + sc +
-  geom_point(aes(color = group), position = position_dodge(width = 2), shape = 1, size = 3) +
+  geom_point(aes(color = group), position = position_dodge(width = 0.1), shape = 1, size = 3) +
   stat_summary(fun=mean, geom = "line", linewidth = 1, aes(color = group)) +
-  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 2, na.rm = TRUE, aes(color = group)) +
+  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 0.5, na.rm = TRUE, aes(color = group)) +
   stat_summary(fun=mean, geom = "point", size = 3, aes(color = group)) +
   theme_classic(base_size = 15) +
   ylab("observed richness")
@@ -162,84 +220,137 @@ meta.rare.noblank %>%
 
 Seems like potentially, richness converges over time between the three groups.  
 
-NEXT STEPS: Need to do stats to see whether these are actually converging (start with linear model?)
-
 ```{r extra code for richness over time, include = FALSE}
 # these plots were generated for my rotation talk, to add in data sequentially
 
 # observed richness but no AR-FMT group
-meta.rare.noblank %>% 
-  filter(day != "21") %>% 
-  ggplot(aes(x=day, y=observed, group = group, alpha = group)) + sc +
-  scale_alpha_manual(values = c(1, 0, 1)) +
-  geom_point(aes(color = group), position = position_dodge(width = 2), shape = 1, size = 3) +
-  stat_summary(fun=mean, geom = "line", linewidth = 1, aes(color = group)) +
-  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 2, na.rm = TRUE, aes(color = group)) +
-  stat_summary(fun=mean, geom = "point", size = 3, aes(color = group)) +
-  theme_classic(base_size = 15) +
-  ylab("observed richness")
-
-# observed richness but no AR-or AR groups
-meta.rare.noblank %>% 
-  filter(day != "21") %>% 
-  ggplot(aes(x=day, y=observed, group = group, alpha = group)) + sc +
-  scale_alpha_manual(values = c(0, 0, 1)) +
-  geom_point(aes(color = group), position = position_dodge(width = 2), shape = 1, size = 3) +
-  stat_summary(fun=mean, geom = "line", linewidth = 1, aes(color = group)) +
-  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 2, na.rm = TRUE, aes(color = group)) +
-  stat_summary(fun=mean, geom = "point", size = 3, aes(color = group)) +
-  theme_classic(base_size = 15) +
-  ylab("observed richness")
+# meta.rare.noblank %>% 
+#   filter(day != "21") %>% 
+#   ggplot(aes(x=day, y=observed, group = group, alpha = group)) + sc +
+#   scale_alpha_manual(values = c(1, 0, 1)) +
+#   geom_point(aes(color = group), position = position_dodge(width = 2), shape = 1, size = 3) +
+#   stat_summary(fun=mean, geom = "line", linewidth = 1, aes(color = group)) +
+#   stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 2, na.rm = TRUE, aes(color = group)) +
+#   stat_summary(fun=mean, geom = "point", size = 3, aes(color = group)) +
+#   theme_classic(base_size = 15) +
+#   ylab("observed richness")
+# 
+# # observed richness but no AR-or AR groups
+# meta.rare.noblank %>% 
+#   filter(day != "21") %>% 
+#   ggplot(aes(x=day, y=observed, group = group, alpha = group)) + sc +
+#   scale_alpha_manual(values = c(0, 0, 1)) +
+#   geom_point(aes(color = group), position = position_dodge(width = 2), shape = 1, size = 3) +
+#   stat_summary(fun=mean, geom = "line", linewidth = 1, aes(color = group)) +
+#   stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 2, na.rm = TRUE, aes(color = group)) +
+#   stat_summary(fun=mean, geom = "point", size = 3, aes(color = group)) +
+#   theme_classic(base_size = 15) +
+#   ylab("observed richness")
 ```
 
-### Statistics
-First, I am comparing the differences in richness between AR and PR chicks at 14 days.
+### Statistics for ZYMO
+This analysis was for the ZYMO grant. I compared richness between AR and PR chicks at 14 days to detect whether there was a statistical difference (there was). It does throw up an error about "ties", not sure what that means but based on my googling hopefully it wouldn't affect the overall conclusion of significance here. I did this using two different packages (slightly different tests?) but they gave the same results.  
 ```{r Wilcox-Mann-Whitney for ZYMO grant, echo = FALSE}
 # filter table to isolate day 14 AR and PR
-meta.rare.d14.noFMT <- meta.rare.noblank %>% 
+meta.rare.d14.noFMT <- meta.rare %>%
   filter(day == "14") %>%
-  filter(group != "AR-FMT") %>% 
-  mutate(day = as.factor(day)) %>% 
+  filter(group != "AR-FMT") %>%
+  mutate(day = as.factor(day)) %>%
   mutate(group = as.factor(group))
 
 # compare means
 wilcox.test(observed ~ group, data=meta.rare.d14.noFMT)
 coin::wilcox_test(observed ~ group, data=meta.rare.d14.noFMT)
 ```
-### Statistics: Modeling
+### Statistics: Linear Model
 I am constructing a model to detect the factors influencing alpha diversity in these Whooping Crane samples. The potential explanatory factors I have are: Individual bird, year, sex, day, and group.  
 
-First I will make a pairs plot.
-```{r pairs, warnings = FALSE, echo = FALSE}
+First I will make a pairs plot.  
+```{r pairs, warning = FALSE, echo = FALSE, message = FALSE}
 # Make pairs plot
-meta.forpairs <- meta.rare.noblank %>% 
-  select(-bird.name, -sample.type, -date.collected, -date.extracted, -sample.weight, -extraction.id, -ng.uL, -A260.280, -day, -year) %>% 
-  mutate(bird.code = as.factor(bird.code)) %>% 
-  mutate(sex = as.factor(sex)) %>% 
-  mutate(group = as.factor(group)) %>% 
-  filter(day_factor != "21")
+meta.forpairs <- meta.rare %>%
+  select(-bird.name, -sample.type, -date.collected, -date.extracted, -sample.weight, -extraction.id, -ng.uL, -A260.280, -is.neg) %>%
+  filter(day != "21")
 pairs(meta.forpairs, lower.panel=panel.smooth, diag.panel=panel.hist,
-      upper.panel=panel.cor)
+upper.panel=panel.cor)
 ```
-The shannon plot looks more even so I will use that one for analysis. I will not look for collinearity since all of my explanatory variables are categorical.
 
+The shannon plot looks more even than observed richness so I will use that one for analysis. I will not look for collinearity since all of my explanatory variables are categorical.
+
+I will now do a linear mixed model with *shannon* as my response variable, *day*, *sex*, *year*, and *group* as my explanatory variables, and *bird.code* as my random variable to correct for differences between birds. Here is the full equation.
+$$
+i = bird\ ID
+$$
+$$
+j = individual\ sample
+$$
+
+**Stochastic part:**
+$$
+Richness_{ij} \sim N(Richness_{det\ ij}, \sigma^2)
+$$
+**Deterministic part:**
+$$
+Richness_{det\ ij} = \alpha + \beta_1 (day_{ij}) + \beta_2 (year_{ij}) + \beta_3 (sex_{ij}) + \beta_4 (group_{ij}) + a_i
+$$
+**Stochastic part for random effect:**
+$$
+a_i \sim N(0, \sigma^2_a)
+$$
+Now I will fit the full model, removing day 21 from analysis.
+```{r fit model, echo = FALSE}
+meta.no21 <- meta.rare %>% 
+  filter(day != "21")
+
+model <- lme(shannon ~ day + year + sex + group, 
+             random=~1|bird.code, data = meta.no21)
+```
+I will also compare the AIC with other versions of the model, removing some variables.  
+  1. day | bird
+  2. group + day | bird  
+  3. group + day + year | bird  
+  4. group * day | bird  
+  
+Below are the AIC values for each model.
+```{r fit alternative models, echo = FALSE}
+model1 <- lme(shannon ~ day,
+             random=~1|bird.code, data = meta.no21)
+model2 <- lme(shannon ~ group + day, 
+             random=~1|bird.code, data = meta.no21)
+model3 <- lme(shannon ~ day + year + group, 
+             random=~1|bird.code, data = meta.no21)
+model4 <- lme(shannon ~ group * day, 
+             random=~1|bird.code, data = meta.no21)
+
+AIC(model)
+AIC(model1)
+AIC(model2)
+AIC(model3)
+AIC(model4)
+```
+Out of all the models, the one that accounts for an interaction between group and day is clearly more supported. I will use that model to look at statistical conclusions about the data.  
+```{r model summary, echo = FALSE}
+summary(model4)
+```
+
+Here's where I am stuck: I do not know how to interpret these results since they break group and day into so many smaller variables. For now I will conclude that because of which model fits the data best, there is clearly support for the fact that the effect of day on alpha diversity changes depending what group you are in. But I would like clearer stats/numbers to point to with this. Maybe I can conduct some post-hoc tests?
 
 ## Beta diversity
 
 I will do some initial beta diversity plots to look for clustering patterns.
 
 ```{r bray curtis setup, include = FALSE}
-# no blanks or day 21
-WC.rare.noblank.no21 <- subset_samples(WC.rare.noblank, day_factor != "21") # remove day 21 from phyloseq
-BrayDist.noblank.no21 <- distance(WC.rare.noblank.no21, method = "bray") # create bray dist matrix
-BrayOrd.noblank.no21 <- ordinate(WC.rare.noblank.no21, "NMDS", distance = BrayDist.noblank.no21) # make NMDS ordination
-BrayPlot.noblank.no21 <- plot_ordination(WC.rare.noblank.no21, BrayOrd.noblank.no21, justDF = TRUE) # make base NMDS plot
+# no day 21
+WC.rare.no21 <- subset_samples(WC.rare, day != "21") # remove day 21 from phyloseq
+BrayDist.no21 <- distance(WC.rare.no21, method = "bray") # create bray dist matrix
+BrayOrd.no21 <- ordinate(WC.rare.no21, "NMDS", distance = BrayDist.no21) # make NMDS ordination
+BrayPlot.no21 <- plot_ordination(WC.rare.no21, BrayOrd.no21, justDF = TRUE) # make base NMDS plot
 ```
 
 Bray Curtis by group:  
 ```{r bray by group, echo = FALSE}
 # just group
-BrayPlot.noblank.no21 %>% 
+BrayPlot.no21 %>%
   ggplot(aes(x=NMDS1, y=NMDS2)) + sc +
   geom_point(size=4, aes(color = group)) +
   labs(shape = "day")
@@ -247,30 +358,31 @@ BrayPlot.noblank.no21 %>%
 
 Adding day as shape:  
 ```{r bray by group and day, echo = FALSE}
-BrayPlot.noblank.no21 %>% 
+# group and day
+BrayPlot.no21 %>%
   ggplot(aes(x=NMDS1, y=NMDS2)) + sc +
-  geom_point(size=4, aes(color = group, shape = day_factor)) +
+  geom_point(size=4, aes(color = group, shape = day)) +
   labs(shape = "day")
 ```
 
-I get the sense here too that beta diversity seems to be converging over time.
+I get the sense here too that beta diversity seems to be converging over time. How can I test this?
 
 ```{r extra code for bray by group, include = FALSE}
 # these plots were generated for my rotation talk, to add in data sequentially
 
 # by group but only PR and AR groups
-BrayPlot.noblank.no21 %>% 
-  ggplot(aes(x=NMDS1, y=NMDS2, alpha = group)) + sc +
-  scale_alpha_manual(values = c(1, 0, 1)) +
-  geom_point(size=4, aes(color = group)) +
-  labs(shape = "day")
-
-# by group but only PR groups
-BrayPlot.noblank.no21 %>% 
-  ggplot(aes(x=NMDS1, y=NMDS2, alpha = group)) + sc +
-  scale_alpha_manual(values = c(0, 0, 1)) +
-  geom_point(size=4, aes(color = group)) +
-  labs(shape = "day")
+# BrayPlot.noblank.no21 %>% 
+#   ggplot(aes(x=NMDS1, y=NMDS2, alpha = group)) + sc +
+#   scale_alpha_manual(values = c(1, 0, 1)) +
+#   geom_point(size=4, aes(color = group)) +
+#   labs(shape = "day")
+# 
+# # by group but only PR groups
+# BrayPlot.noblank.no21 %>% 
+#   ggplot(aes(x=NMDS1, y=NMDS2, alpha = group)) + sc +
+#   scale_alpha_manual(values = c(0, 0, 1)) +
+#   geom_point(size=4, aes(color = group)) +
+#   labs(shape = "day")
 ```
 NEXT STEPS:  
 
@@ -281,8 +393,8 @@ NEXT STEPS:
 ### Statistics
 
 First I want to see if PERMANOVA identifies whether the composition is significant by group.
-```{r}
-adonis2(BrayDist.noblank.no21 ~ group, data = meta(WC.rare.noblank.no21))
+```{r adonis, echo = FALSE}
+adonis2(BrayDist.no21 ~ group, data = meta(WC.rare.no21))
 ```
 
 
