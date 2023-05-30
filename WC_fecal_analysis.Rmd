@@ -1,7 +1,7 @@
 ---
 title: "Whooping Crane data analysis: Fecal Samples"
 author: "Jess Diaz"
-date: "2023-04-03"
+date: "`r format(Sys.time(), '%a %d %b')`"
 output:
   rmdformats::readthedown
 ---
@@ -306,7 +306,7 @@ model <- lme(shannon ~ day + year + sex + group,
              random=~1|bird.code, data = meta.no21)
 ```
 I will also compare the AIC with other versions of the model, removing some variables.  
-  1. day | bird
+  1. day | bird  
   2. group + day | bird  
   3. group + day + year | bird  
   4. group * day | bird  
@@ -392,12 +392,23 @@ NEXT STEPS:
 
 ### Statistics
 
-First I want to see if PERMANOVA identifies whether the composition is significant by group.
+First I want to see if PERMANOVA identifies whether the composition is significant by group and day.
 ```{r adonis, echo = FALSE}
-adonis2(BrayDist.no21 ~ group, data = meta(WC.rare.no21))
+adonis2(BrayDist.no21 ~ group * day, data = meta(WC.rare.no21))
 ```
+Group and day are both significant, but their interaction term is not.  
 
+Do I need to account for repeated sampling of individual birds, and how do I do that?
 
+## Beta dispersion analysis
+
+Now I will conduct a beta dispersion analysis to see if the groups differ in their variance.  
+```{r beta disper, echo = FALSE}
+disp <- vegan::betadisper(BrayDist.no21, meta.no21$group)
+anova(disp)
+TukeyHSD(disp)
+```
+It seems that the AR and AR-FMT groups are not different in variance, but PR and AR are super different. PR and AR-FMT are almost different. This lines up with how the bray curtis graphs look.
 
 
 
