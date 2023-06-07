@@ -410,5 +410,47 @@ TukeyHSD(disp)
 ```
 It seems that the AR and AR-FMT groups are not different in variance, but PR and AR are super different. PR and AR-FMT are almost different. This lines up with how the bray curtis graphs look.
 
+## Campylobacter and Salmonella
+
+I would like to compare the relative abundance of bacterial taxa of Campylobacter and Salmonella genuses between rearing groups, because these are typically screened in Whooping Cranes as potential pathogens (Keller and Hartup 2013). I expect there to be a high number of cranes with Campylobacter (at least among captive reared) and a low number with Salmonella.  
+
+```{r Campylobacter, echo = FALSE}
+# transform read counts to relative abundance
+WC_relative <- microbiomer::to_RA(WC)
+
+# merge taxa at the genus level
+WC_familyglom <- tax_glom(WC_relative, taxrank = rank_names(WC)[5], NArm = FALSE)
+
+# melt phyloseq object into dataframe
+FamilyGlom <- psmelt(WC_familyglom)
+
+# isolate campylobacter
+FamilyGlom.Campy <- FamilyGlom %>% 
+  filter(Family == "Campylobacteraceae") %>% 
+  filter(sample.type == "fecal") %>% 
+  filter(day != "21") %>% 
+  mutate(Campy_YN = if_else(Abundance > 0, "Yes", "No"))
+
+# plot
+# FamilyGlom.Campy %>% 
+#   ggplot(aes(x=group, y=Abundance)) + sc +
+#   geom_point(size=4, aes(color = group, shape = day)) +
+#   facet_wrap(vars(day))
+
+FamilyGlom.Campy %>% 
+  ggplot(aes(x=day, y=Abundance, group = group)) + sc +
+  geom_point(aes(color = group), position = position_dodge(width = 0.1), shape = 1, size = 3) +
+  stat_summary(fun=mean, geom = "line", linewidth = 1, aes(color = group)) +
+  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 0.5, na.rm = TRUE, aes(color = group)) +
+  stat_summary(fun=mean, geom = "point", size = 3, aes(color = group)) +
+  theme_classic(base_size = 15) +
+  ylab("Relative abundance of Campylobacter")
+
+FamilyGlom.Campy %>% 
+  ggplot(aes(x=day, fill = Campy_YN, color = Campy_YN)) +
+  geom_bar(position = position_dodge2(), alpha = 0.75) +
+  facet_wrap(vars(group))
+```
+There was no Salmonella detected in any of the samples.
 
 
