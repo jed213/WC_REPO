@@ -20,6 +20,7 @@ library(vegan)
 library(decontam)
 library(nlme)
 library(rmdformats)
+library(microbiomer)
 source("HighstatLibV10.R")
 ```
 
@@ -277,7 +278,7 @@ upper.panel=panel.cor)
 
 The shannon plot looks more even than observed richness so I will use that one for analysis. I will not look for collinearity since all of my explanatory variables are categorical.
 
-I will now do a linear mixed model with *shannon* as my response variable, *day*, *sex*, *year*, and *group* as my explanatory variables, and *bird.code* as my random variable to correct for differences between birds. Here is the full equation.
+I will now do a linear mixed model with *shannon* as my response variable, *day* and *group* as my explanatory variables, and *bird.code* as my random variable to correct for differences between birds. I am not particularly interested in the effects of *year* and *sex* - these are fairly evenly distributed so I don't think they will have much of an effect (when I played around including them in the model I got a "singular" fit error). Here is the full equation for the base model.
 $$
 i = bird\ ID
 $$
@@ -291,49 +292,42 @@ Richness_{ij} \sim N(Richness_{det\ ij}, \sigma^2)
 $$
 **Deterministic part:**
 $$
-Richness_{det\ ij} = \alpha + \beta_1 (day_{ij}) + \beta_2 (year_{ij}) + \beta_3 (sex_{ij}) + \beta_4 (group_{ij}) + a_i
+Richness_{det\ ij} = \alpha + \beta_1 (day_{ij}) + \beta_2 (group_{ij}) + a_i
 $$
 **Stochastic part for random effect:**
 $$
 a_i \sim N(0, \sigma^2_a)
 $$
-Now I will fit the full model, removing day 21 from analysis.
+Now I will fit the full model, removing day 21 from analysis. I need to fit using maximum likelihood so that I can compare the later models which have different fixed effects.  
 ```{r fit model, echo = FALSE}
 meta.no21 <- meta.rare %>% 
   filter(day != "21")
 
-model <- lme(shannon ~ day + year + sex + group, 
-             random=~1|bird.code, data = meta.no21)
+model <- lmer(shannon ~ day + group + (1|bird.code), 
+             REML = FALSE, meta.no21)
 ```
-I will also compare the AIC with other versions of the model, removing some variables.  
+
+I will also compare the AIC with other versions of the model as listed below.  
   1. day | bird  
-  2. group + day | bird  
-  3. group + day + year | bird  
-  4. group * day | bird  
+  2. group * day | bird  
   
 Below are the AIC values for each model.
 ```{r fit alternative models, echo = FALSE}
-model1 <- lme(shannon ~ day,
-             random=~1|bird.code, data = meta.no21)
-model2 <- lme(shannon ~ group + day, 
-             random=~1|bird.code, data = meta.no21)
-model3 <- lme(shannon ~ day + year + group, 
-             random=~1|bird.code, data = meta.no21)
-model4 <- lme(shannon ~ group * day, 
-             random=~1|bird.code, data = meta.no21)
+model1 <- lmer(shannon ~ day + (1|bird.code), 
+             REML = FALSE, meta.no21)
+model2 <- lmer(shannon ~ day * group + (1|bird.code), 
+             REML = FALSE, meta.no21)
 
 AIC(model)
 AIC(model1)
 AIC(model2)
-AIC(model3)
-AIC(model4)
 ```
 Out of all the models, the one that accounts for an interaction between group and day is clearly more supported. I will use that model to look at statistical conclusions about the data.  
 ```{r model summary, echo = FALSE}
-summary(model4)
+summary(model2)
 ```
 
-Here's where I am stuck: I do not know how to interpret these results since they break group and day into so many smaller variables. For now I will conclude that because of which model fits the data best, there is clearly support for the fact that the effect of day on alpha diversity changes depending what group you are in. But I would like clearer stats/numbers to point to with this. Maybe I can conduct some post-hoc tests?
+Here's where I am stuck: I do not know how to interpret these results since they break group and day into so many smaller variables. For now I will conclude that because of which model fits the data best, there is clearly support for the fact that the effect of day on alpha diversity changes depending what group you are in. But I would like clearer stats/numbers to point to with this. Maybe I can conduct some post-hoc tests? Need to look at Rachel's suggestions.
 
 ## Beta diversity
 
@@ -451,6 +445,17 @@ FamilyGlom.Campy %>%
   geom_bar(position = position_dodge2(), alpha = 0.75) +
   facet_wrap(vars(group))
 ```
+
+```{r Campy table, include = FALSE}
+ftable(xtabs(~ group+day+Campy_YN, data = FamilyGlom.Campy))
+```
+
+![Table made in excel. Shows percentage of Campylobacter-positive chicks in each group at each timepoint.](Campylobacter_table.png)
+
+These plots and tables suggest that there is not much going on with the Campylobacter angle. ALl the groups and timepoints seem to have between 60-100% positive individuals with Campylobacter. This matches the 90% number in the Keller and Hartup paper from 2013 and might be interesting to note in an eventual paper.  
+
 There was no Salmonella detected in any of the samples.
+
+
 
 
