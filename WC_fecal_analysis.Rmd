@@ -23,6 +23,8 @@ library(rmdformats)
 library(microbiomer)
 library(car)
 library(visreg)
+library(emmeans)
+library(pairwiseAdonis)
 source("HighstatLibV10.R")
 ```
 
@@ -69,7 +71,7 @@ This document is intended for initial analysis of the Whooping Crane fecal seque
 # Data Cleanup and Setup
 
 ## Data Summary
-```{r data summaries, echo = FALSE, warnings = FALSE}
+```{r data summaries, echo = FALSE, warnings = FALSE, message = FALSE}
 # data summaries
 summarize_phyloseq(WC)
 ```
@@ -345,9 +347,12 @@ AIC(model4)
 AIC(model5)
 AIC(model6)
 ```
-Out of all the models, the most supported is the full model that includes an interaction term between group and day. I will use that model to look at statistical conclusions about the data going forward, first checking the model fit. 
+Out of all the models, the most supported is the full model that includes an interaction term between group and day. I will refit the model using REML and use that to look at statistical conclusions about the data going forward, first checking the model fit. 
 
 ```{r model validation, echo = FALSE}
+model6 <- lme(shannon ~ day * group + sex + year, random=~1|bird.code, 
+               method = "REML", data = meta.no21)
+
 # plot residuals against fitted values
 plot(model6)
 
@@ -364,26 +369,29 @@ qqline(resid(model6))
 
 The model passes. Now some results:  
 
-```{r model results, echo = FALSE, warnings = FALSE}
+```{r model results, echo = FALSE, warnings = FALSE, message = FALSE}
 summary(model6)
 
 # test significance of terms
-# car::Anova(model6)
-drop1(model6, test='Chisq')
+car::Anova(model6)
+# drop1(model6, test='Chisq')
 ```
-Based on the model test using drop1(), adding sex and year to the model doesn't seem to change it's fit very much. But adding the interaction term between day and group makes a huge difference, significantly improving the model. Need to verify why day and group singular terms aren't in the drop1() output/how to interpret that.  
+Based on the model test using Anova(), adding sex and year to the model doesn't seem to change it's fit very much. But adding the interaction term between day and group makes a huge difference, significantly improving the model. I couldn't use drop1() for this because it didn't give an AIC?  
 
 Using visreg(), I can visualize the model. Might be worth making year and/or day a continuous variable?
 ```{r visualize model, echo = FALSE}
 visreg(model6, xvar = "day", by = "group", data = meta.no21)
 ```
+## Post-hoc tests
 
-Now I will do post-hoc tests between all my combinations of groups to see what is statistically different from each other.  
+Now I will do post-hoc tests between all my combinations of groups to see what is statistically different from each other. I am using a multiple comparison with Tukey adjustment through the methods described here: https://biostats.w.uib.no/post-hoc-tests-multiple-comparisons-in-linear-models-2/  
 
 ```{r tukey, echo = FALSE}
-# tukey tests
-# https://search.r-project.org/CRAN/refmans/biometryassist/html/multiple_comparisons.html
-# summary(glht(FeTMB, linfct = mcp(line = ‘Tukey’)))
+# gives means for each group/day pair
+emm <- emmeans(model6, ~ group * day)
+
+# give p-value comparisons for each pair
+pairs(emm, simple = "each", adjust = "holm")
 ```
 
 # Beta diversity
@@ -437,19 +445,30 @@ I get the sense here too that beta diversity seems to be converging over time. H
 #   geom_point(size=4, aes(color = group)) +
 #   labs(shape = "day")
 ```
-NEXT STEPS:  
 
-* proper beta dispersion analysis
-* statistical analysis (compare group means/direction with adonis + post hoc pairwise comparisons (maybe adonis with multiple variables?))
-* trajectory of change in each bird over time?
 
-## Statistics
+## PERMANOVA
 
 First I want to see if PERMANOVA identifies whether the composition is significant using the same model structure found for alpha diversity (group * day + sex + year), and including bird.code as a fixed effect because adonis2 cannot do random effects. I plan to move this to Primer7 eventually which should be able to handle random effects.  
 ```{r adonis, echo = FALSE}
 adonis2(BrayDist.no21 ~ group * day + sex + year + bird.code, data = meta(WC.rare.no21))
 ```
-All terms are significant except for bird.code. Next steps will be post-hoc tests between each of the groups. After will want to find a way to see how the diversity is moving over time.  
+All terms are significant except for bird.code. 
+
+Next step will be post-hoc tests between each of the groups. For this I am using the pairwiseAdonis package.
+```{r pairwise Adonis, echo = FALSE}
+# pairwise by group
+pairwise.adonis(BrayDist.no21, meta(WC.rare.no21)$group)
+
+# pairwise by day
+pairwise.adonis(BrayDist.no21, meta(WC.rare.no21)$day)
+
+# pairwise by year
+pairwise.adonis(BrayDist.no21, meta(WC.rare.no21)$year)
+```
+Looks like PR is different from both AR and AR-FMT, but those are not different to each other. The day pairwise comparison confirms movement over time, where the early timepoints are different from the later timepoints. Additionally, all years were significantly different from each other so year should definitely continue to be accounted for in the analyses.  
+
+Now is there a way to dig into the direction of movement over time?
 
 ## Beta dispersion analysis
 
@@ -462,6 +481,8 @@ TukeyHSD(disp)
 It seems that the AR and AR-FMT groups are not different in variance, but PR and AR are super different. PR and AR-FMT are almost different. This lines up with how the bray curtis graphs look.
 
 # Campylobacter and Salmonella
+
+## Initial exploration
 
 I would like to compare the relative abundance of bacterial taxa of Campylobacter and Salmonella genuses between rearing groups, because these are typically screened in Whooping Cranes as potential pathogens (Keller and Hartup 2013). I expect there to be a high number of cranes with Campylobacter (at least among captive reared) and a low number with Salmonella.  
 
@@ -513,6 +534,20 @@ These plots and tables suggest that there is not much going on with the Campylob
 
 There was no Salmonella detected in any of the samples.
 
+## Logistic regression (Campy)
+
+I will use a similar model setup from the previous analyses to run a logistic regression testing whether presence of Campylobacter is influenced by group, day, year, and sex, with bird ID as a random variable.
+```{r Logistic regression, echo = FALSE}
+# # turn YN into 0 and 1
+# FamilyGlom.Campy <- FamilyGlom.Campy %>% 
+#   mutate(Campy_01 = if_else(Abundance > 0, 1, 0))
+# 
+# # fit model
+# campy_model <- glm(Campy_01 ~ group * day + year + sex, family=binomial, data=FamilyGlom.Campy)
+# 
+# # plot model
+# plot(Campy_01 ~ day)
+```
 
 
 
