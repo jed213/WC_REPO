@@ -26,6 +26,8 @@ library(visreg)
 library(emmeans)
 library(pairwiseAdonis)
 source("HighstatLibV10.R")
+library(ANCOMBC)
+library(tibble)
 ```
 
 ```{r set global parameters, include=FALSE}
@@ -480,6 +482,70 @@ TukeyHSD(disp)
 ```
 It seems that the AR and AR-FMT groups are not different in variance, but PR and AR are super different. PR and AR-FMT are almost different. This lines up with how the bray curtis graphs look.
 
+## Differential Abundance (ANCOM-BC)
+
+```{r Old ANCOM code, include = FALSE}
+# plot.ancombc.asc <- function(phy_object, taxonomy, grouping) {
+#   tax_data = aggregate_taxa(phy_object, taxonomy)
+#   tax_mat = as(tax_table(tax_data), "matrix")
+#   ancombc_out = ancombc(phyloseq = tax_data, formula = grouping, p_adj_method = "BH", group = grouping)
+#   res = ancombc_out$res
+#   res_global = ancombc_out$res_global
+# 
+#   df_fig1 = data.frame(res$beta * res$diff_abn, check.names = FALSE) %>%
+#     rownames_to_column("ASV")
+#   colnames(df_fig1)[-1] = "BETA"
+#   df_fig2 = data.frame(res$se * res$diff_abn, check.names = FALSE) %>%
+#     rownames_to_column("ASV")
+#   colnames(df_fig2)[-1] = "SD"
+#   df_fig = df_fig1 %>% left_join(df_fig2, by = "ASV") %>%
+#     transmute(ASV, BETA, SD) %>%
+#     filter(BETA != 0) %>% arrange(BETA) %>%
+#     mutate(group = ifelse(BETA >0, "g1", "g2"))
+#   df_fig$ASV = factor(df_fig$ASV, levels = df_fig$ASV)
+# 
+#   return(df_fig)
+# }
+
+# # subset samples to remove AR-FMT group and isolate day 14
+# WC.noFMT.d14 <- subset_samples(WC.rare.no21, group != "AR-FMT" & day == "14")
+# 
+# # run ANCOMBC based on order and zoo status
+# set.seed(14)
+# ANCOM.O.ARPR.d14 <- plot.ancombc.asc(WC.noFMT.d14, "Order", "group")
+# # remove unknowns
+# ANCOMOrdFUFR <- ANCOMOrdFUFR[ANCOMOrdFUFR$ASV != "Unknown",]
+# 
+# # make list of phyla represented by identified orders
+# ANCOMOrdFUFRPhyla <- vector(mode = "list", length = 13)
+# for(row in 1:13) {
+#   order <- ANCOMOrdFUFR$ASV[row]
+#   print(order)
+#   for(tax in 1:length(t(ASV_taxonomy_decontam))) {
+#     if(is.na(ASV_taxonomy_decontam$Order[tax])) {
+#       print("NA")
+#     } else if(ASV_taxonomy_decontam$Order[tax] == order){
+#       phylum <- ASV_taxonomy_decontam$Phylum[tax]
+#       print("match")
+#       print(phylum)
+#       ANCOMOrdFUFRPhyla[row] <- as.character(phylum)
+#       break
+#     } else {
+#     }
+#   }
+# }
+# ANCOMOrdFUFR$Phylum <- ANCOMOrdFUFRPhyla
+# ANCOMOrdFUFR$Phylum <-factor(ANCOMOrdFUFR$Phylum, levels = c("Actinobacteriota", "Firmicutes", "Proteobacteria", "Desulfobacterota", "Deferribacterota"))
+```
+For differential abundance, I want to compare which taxa are more prevalent between the three treatments.
+```{r ANCOMBC2 AR vs PR, message = FALSE, warnings = FALSE}
+WC.d14 <- subset_samples(WC.rare.no21, day == "14")
+# ancom2.test <- ancombc2(data = WC.noFMT.d14, tax_level = "Order", fix_formula = "group", rand_formula = "bird.code",
+#   p_adj_method = "BH", group = "group")
+```
+
+
+
 # Campylobacter and Salmonella
 
 ## Initial exploration
@@ -535,18 +601,31 @@ These plots and tables suggest that there is not much going on with the Campylob
 There was no Salmonella detected in any of the samples.
 
 ## Logistic regression (Campy)
-
-I will use a similar model setup from the previous analyses to run a logistic regression testing whether presence of Campylobacter is influenced by group, day, year, and sex, with bird ID as a random variable.
+*this section needs work*
+I will use a similar model setup from the previous analyses to run a logistic regression testing whether presence of Campylobacter is influenced by group, day, and year, with bird ID as a random variable. *still need to put in bird ID*
 ```{r Logistic regression, echo = FALSE}
-# # turn YN into 0 and 1
-# FamilyGlom.Campy <- FamilyGlom.Campy %>% 
-#   mutate(Campy_01 = if_else(Abundance > 0, 1, 0))
-# 
-# # fit model
-# campy_model <- glm(Campy_01 ~ group * day + year + sex, family=binomial, data=FamilyGlom.Campy)
-# 
-# # plot model
-# plot(Campy_01 ~ day)
+# turn YN into 0 and 1
+FamilyGlom.Campy <- FamilyGlom.Campy %>%
+  mutate(Campy_01 = if_else(Abundance > 0, 1, 0))
+
+# fit model
+campy_model <- glm(Campy_01 ~ group * day + year, family=binomial(link="logit"), data=FamilyGlom.Campy)
+
+# plot model
+FamilyGlom.Campy %>% 
+  ggplot(aes(x=day, y = Campy_01, color = Campy_YN)) +
+  geom_point(position = position_dodge2(width = 3), alpha = 0.75) +
+  facet_wrap(vars(group))
+plot(campy_model$fitted.values)
+
+# check residuals
+plot(residuals(campy_model, type="response") ~ campy_model$fitted.values)
+
+simulationOutput <- simulateResiduals((fittedModel=campy_model))
+plotResiduals(simulationOutput, quantiles=NULL)
+
+# interpret results
+summary(campy_model)
 ```
 
 
