@@ -488,10 +488,43 @@ It seems that the AR and AR-FMT groups are not different in variance, but PR and
 ## Differential Abundance (ANCOM-BC)
 
 For differential abundance, I want to compare which taxa are more prevalent between the the treatments.
-```{r ANCOMBC2 AR vs PR, message = FALSE, warnings = FALSE}
-# WC.d14.noFMT <- subset_samples(WC.rare.no21, day == "14" & group != "AR-FMT")
-# ancom2.test <- ancombc2(data = WC.d14.noFMT, tax_level = "Order", fix_formula = "group", p_adj_method = "BH", group = "group")
+```{r ANCOMBC2 AR vs PR vs FMT, message = FALSE, warnings = FALSE}
+# Pairwise comparisons between all three groups
+# This contains all data points except d21
+set.seed(14)
+ANCOM.all <- ancombc2(data = WC.rare.no21,
+                 tax_level = NULL,
+                 fix_formula = "group",
+                 p_adj_method = "BH",
+                 group = "group",
+                 verbose = TRUE,
+                 pairwise = TRUE)
 ```
+
+```{r plot ANCOMBC2 AR vs PR vs FMT}
+# AR vs PR
+tax_data <- aggregate_taxa(WC.rare.no21, "Family")
+tax_mat <- as(tax_table(tax_data), "matrix")
+tax.1 <- as(tax_table(WC.rare.no21), "matrix")
+tax.frame <- as.data.frame(tax_table(WC.rare.no21)) %>% 
+  mutate(TAXON = row.names(tax.frame))
+res <- ANCOM.all$res_pair
+df_fig1 <- data.frame(res$lfc_groupPR * res$diff_groupPR, check.names = FALSE) %>% 
+  rownames_to_column("ASV")
+colnames(df_fig1)[-1] = "BETA"
+df_fig1 <- df_fig1 %>% 
+  mutate(SD = res$se_groupPR * res$diff_groupPR) %>% 
+  mutate(TAXON = res$taxon) %>% 
+  filter(BETA != 0) %>% 
+  arrange(BETA) %>% 
+  mutate(group = ifelse(BETA >0, "g1", "g2"))
+df_fig = df_fig1 %>% left_join(tax.frame, by = "TAXON")
+
+df_fig
+```
+
+
+When I try to run this analysis including day as a random variable or subsetting to one day, I get the infinite error "Warning: longer object length is not a multiple of shorter object length". I do not know why this error is occuring.
 
 ```{r Old ANCOM code, include = FALSE}
 # plot.ancombc.asc <- function(phy_object, taxonomy, grouping) {
@@ -516,12 +549,10 @@ For differential abundance, I want to compare which taxa are more prevalent betw
 #   return(df_fig)
 # }
 
-# # subset samples to remove AR-FMT group and isolate day 14
-# WC.noFMT.d14 <- subset_samples(WC.rare.no21, group != "AR-FMT" & day == "14")
+#
 # 
 # # run ANCOMBC based on order and zoo status
-# set.seed(14)
-# ANCOM.O.ARPR.d14 <- plot.ancombc.asc(WC.noFMT.d14, "Order", "group")
+
 # # remove unknowns
 # ANCOMOrdFUFR <- ANCOMOrdFUFR[ANCOMOrdFUFR$ASV != "Unknown",]
 # 
