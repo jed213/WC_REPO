@@ -42,7 +42,7 @@ The final file name is called *WCFECAL-pe-33-manifest* and saved as a .csv. I th
 
 ## Using QIIME2 in the cluster
 
-The following code is reference for loading qiime2 in the cluster and running an interactive job.
+The following code is reference for loading qiime2 in the cluster and running an interactive job. I u.sed qiime2 version 2022.11
 
 ```{bash cluster setup, eval = FALSE}
 # load qiime2

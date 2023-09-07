@@ -1,0 +1,77 @@
+---
+title: "WC_RUN2_QIIME2_processing"
+author: "Jess Diaz"
+date: "2023-09-07"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Step 1: Import sequencing files
+
+In order to properly use the sequencing files in QIIME2, I first need to download all the sequencing files from the Kohl Lab BaseSpace account and upload them into the cluster into one folder. The sequences from Run1 were already in the cluster in the main/seqs folder, so I copied this into main2/seqs. (NOTE: I did remove the Blank 5 files as those were from a different project).
+
+Downloading the run2 files was done by Jose and the files were deposited into the shared OneDrive. I then uploaded these files into the cluster using the ondemand user interface into main2/seqs along with the run1 files. Jose had already defoldered these.  
+
+In the end, there were 306 files from 153 samples (151 samples including redos plus 2 blanks) for Run 1 and 120 files from 60 samples (57 samples plus 3 blanks) from Run 2.
+
+## Step 2: Generate manifest file
+
+To import the files I needed to have a manifest file which associates each fastq.gz file with a sample name and whether it is a forward or reverse file. Instructions for this were in Elizabeth's *BaseSpace Protocol* Word Doc.  
+The final file name is called *WCRUN2-pe-33-manifest* and saved as a .csv. I then uploaded it to the cluster directory where the sequence files are.
+
+## Using QIIME2 in the cluster
+
+The following code is reference for loading qiime2 in the cluster and running an interactive job. I used Qiime2 version 2023.5.
+
+```{bash cluster setup, eval = FALSE}
+# load qiime2
+module load qiime2/2023.5
+
+# check it's working
+qiime --help
+
+# run interactive job
+srun --pty bash
+
+# submit normal job
+sbatch [job script]
+```
+
+## Step 3: Import samples to QIIME2
+
+Instructions for this were in Elizabeth's *BaseSpace Protocol* Word Doc.
+
+```{bash import to qiime2, eval = FALSE}
+# first, cd to file directory
+# import samples using manifest file
+qiime tools import \
+  --type 'SampleData[PairedEndSequencesWithQuality]' \
+  --input-path WCRUN2-pe-33-manifest.csv \
+  --output-path paired-end-demux.qza \
+  --input-format PairedEndFastqManifestPhred33
+  
+# make sure it ran correctly
+qiime tools peek paired-end-demux.qza
+```
+
+These files have been imported into QIIME2 as Sample Data (paired end with quality info), of the data format SingleLanePerSamplePairedEndFastqDirFmt.
+
+## Step 4: Sequence trimming
+
+Instructions for this were in Elizabeth's *BaseSpace Protocol* Word Doc.  
+
+Now that the sequences have been uploaded into QIIME2 in a useable format, we can look at the sequence length and quality in order to know how to trim the data.  
+
+```{bash visualize quality, eval = FALSE}
+# visualize reads
+qiime demux summarize \
+  --i-data paired-end-demux.qza \
+  --o-visualization paired-end-demux.qzv
+  
+# download .qzv file and view through view.qiime2.org
+```
+
+
