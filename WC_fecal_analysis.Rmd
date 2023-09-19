@@ -28,6 +28,7 @@ library(pairwiseAdonis)
 source("HighstatLibV10.R")
 library(ANCOMBC)
 library(tibble)
+library(tidyr)
 ```
 
 ```{r set global parameters, include=FALSE}
@@ -67,6 +68,7 @@ sample_data(WC)$sex <- C(factor(sample_data(WC)$sex), sum)
 # remove blank 5 (not from my study)
 WC <- subset_samples(WC, bird.code != "Blank-5")
 ```
+
 
 This document is intended for initial analysis of the Whooping Crane fecal sequencing data. Included in this analysis are 122 samples spread across 34 chicks, 5 years, and 5 timepoints. 2 extraction blanks were included in this analysis, as well as several PCR blanks which are not included here (Jose is making sure that they look clean).  
 
@@ -174,6 +176,125 @@ Based on the read counts, I will rarefy at 8113 to retain all data points except
 
 ```{r rarefy, include=FALSE}
 WC.rare <- rarefy_even_depth(WC.decontam, sample.size=8113, rngseed=14, verbose=TRUE) # rarefy
+```
+
+# Metabolomics
+
+```{r importing metabolomics, include = FALSE}
+BileAcids <- read_excel("Metabolomics_August2023_import.xlsx", sheet = "Bile Acids")
+SCFA <- read_excel("Metabolomics_August2023_import.xlsx", sheet = "SCFAs")
+Combined <- read_excel("Metabolomics_August2023_import.xlsx", sheet = "Combined")
+```
+
+## Initial Plots - SCFA
+
+First I want to look for any initial trends over time.
+
+```{r SCFA plots}
+SCFA.long <- Combined %>% 
+  select("Sample", "Sex", "Day", "Group", "Acetic Acid", "Propionic Acid", 
+         "Isobutyric Acid", "Butyric Acid", "Isovaleric Acid", "Valeric Acid", 
+         "Isocaproic Acid", "Caproic Acid") %>% 
+  pivot_longer(-c(Sample, Sex, Day, Group), names_to = "SCFA", values_to = "umol_g_stool")
+
+SCFA.long %>% 
+  ggplot(aes(x = Day, y = umol_g_stool, color = SCFA)) +
+  geom_point(aes(color = SCFA), position = position_dodge(width = 0.1), shape = 1, size = 3) +
+  stat_summary(fun=mean, geom = "line", linewidth = 1, aes(color = SCFA)) +
+  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 0.5, na.rm = TRUE, aes(color = SCFA)) +
+  stat_summary(fun=mean, geom = "point", size = 3, aes(color = SCFA)) +
+  theme_classic(base_size = 15)
+```
+
+Then I want to see within each day, how do they look according to group?  
+```{r SCFA plots D14}
+SCFA.14 <- SCFA.long %>% 
+  filter(Day == "14")
+
+SCFA.14 %>% 
+  ggplot(aes(x = Group, y = umol_g_stool, color = Group)) +
+  geom_point() +
+  facet_wrap(vars(SCFA))
+
+SCFA.30 <- SCFA.long %>% 
+  filter(Day == "30")
+
+SCFA.30 %>% 
+  ggplot(aes(x = Group, y = umol_g_stool, color = Group)) +
+  geom_point() +
+  facet_wrap(vars(SCFA))
+
+SCFA.50 <- SCFA.long %>% 
+  filter(Day == "50")
+
+SCFA.50 %>% 
+  ggplot(aes(x = Group, y = umol_g_stool, color = Group)) +
+  geom_point() +
+  facet_wrap(vars(SCFA))
+
+SCFA.70 <- SCFA.long %>% 
+  filter(Day == "70")
+
+SCFA.70 %>% 
+  ggplot(aes(x = Group, y = umol_g_stool, color = Group)) +
+  geom_point() +
+  facet_wrap(vars(SCFA))
+```
+Now I will do the same thing for bile acids.
+
+## Initial Plots - BA
+
+First I want to look for any initial trends over time.
+
+```{r BA plots}
+BA.long <- Combined %>% 
+  select("Sample", "Sex", "Day", "Group", "alpha-MCA", 
+         "beta-MCA", "CDCA", "CA", "DCA", "gamma-MCA", "GCA", "GDCA", "LCA", 
+         "omega-MCA", "TCDCA", "TCA", "TDCA", "TLCA") %>% 
+  pivot_longer(-c(Sample, Sex, Day, Group), names_to = "BA", values_to = "nmol_g_stool")
+
+BA.long %>% 
+  ggplot(aes(x = Day, y = nmol_g_stool, color = BA)) +
+  geom_point(aes(color = BA), position = position_dodge(width = 0.1), shape = 1, size = 3) +
+  stat_summary(fun=mean, geom = "line", linewidth = 1, aes(color = BA)) +
+  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 0.5, na.rm = TRUE, aes(color = BA)) +
+  stat_summary(fun=mean, geom = "point", size = 3, aes(color = BA)) +
+  theme_classic(base_size = 15)
+```
+
+Then I want to see within each day, how do they look according to group?  
+```{r BA plots D14}
+BA.14 <- BA.long %>% 
+  filter(Day == "14")
+
+BA.14 %>% 
+  ggplot(aes(x = Group, y = nmol_g_stool, color = Group)) +
+  geom_point() +
+  facet_wrap(vars(BA))
+
+BA.30 <- BA.long %>% 
+  filter(Day == "30")
+
+BA.30 %>% 
+  ggplot(aes(x = Group, y = nmol_g_stool, color = Group)) +
+  geom_point() +
+  facet_wrap(vars(BA))
+
+BA.50 <- BA.long %>% 
+  filter(Day == "50")
+
+BA.50 %>% 
+  ggplot(aes(x = Group, y = nmol_g_stool, color = Group)) +
+  geom_point() +
+  facet_wrap(vars(BA))
+
+BA.70 <- BA.long %>% 
+  filter(Day == "70")
+
+BA.70 %>% 
+  ggplot(aes(x = Group, y = nmol_g_stool, color = Group)) +
+  geom_point() +
+  facet_wrap(vars(BA))
 ```
 
 # Alpha diversity
