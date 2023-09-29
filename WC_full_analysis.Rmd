@@ -1,0 +1,227 @@
+---
+title: "WC full analysis"
+author: "Jess Diaz"
+date: "`r format(Sys.time(), '%a %d %b')`"
+output:
+  rmdformats::readthedown
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Setup
+```{r load packages, include=FALSE}
+library(qiime2R)
+library(microbiome)
+library(dplyr)
+library(ggplot2)
+library(vegan)
+library(decontam)
+library(nlme)
+library(rmdformats)
+library(microbiomer)
+library(car)
+library(visreg)
+library(emmeans)
+library(pairwiseAdonis)
+source("HighstatLibV10.R")
+library(ANCOMBC)
+library(tibble)
+library(tidyr)
+library(lemon)
+```
+
+```{r set global parameters, include=FALSE}
+theme_set(theme_classic())
+
+sc <- scale_color_manual(values = c("AR" = "#C34554", 
+                                    "AR-FMT" = "#55B35E", 
+                                    "PR" = "#81B1F7")) 
+
+knit_print.data.frame <- lemon_print
+```
+
+```{r functions, include=FALSE}
+# calculates values for stats bars for plots
+data.summary <- function(x) {
+  m <- mean(x)
+  ymin <- m-sd(x)
+  ymax <- m+sd(x)
+  return(c(y=m, ymin=ymin, ymax=ymax))
+}
+```
+
+This document is intended to show the full analysis of the Whooping Crane data. Included in this analysis are:  
+* 122 fecal samples spread across 34 chicks, 5 years, and 5 timepoints  
+* ? tracheal samples spread across ? chicks, ? years, and 2 timepoints  
+
+These results were sequenced over three runs:  
+1) Run 1 included the fecal sample 16S sequencing plus 2 extraction blanks  
+2) Run 2 included the tracheal sample 16S sequencing, the donor and inoculum fecal samples, and 3 extraction blanks  
+3) Run 3 included the tracheal sample ITS sequencing (+ any blanks?)  
+
+There were also several PCR blanks done with these runs at the sequencing facility. I never see those sequences but I believe Jose checks them to make sure they look clean.
+
+# Data Import and Summary
+
+## Import 16S data
+
+I imported the 16S files from QIIME for runs 1 and 2 together. Note, I had to change the metadata file from what was used in QIIME. There were some "empty" rows and columns that were causing issues importing the data, so I just deleted those. I also added the "blank" sample type to the Run 2 blanks which were missing that.  
+
+```{r create 16S phyloseq object, include = FALSE, message = FALSE}
+# create master phyloseq
+WC <- qza_to_phyloseq(
+  features = "table-filt-bytaxa.qza",
+  tree = "rooted-tree.qza",
+  taxonomy = "taxonomy.qza",
+  metadata = "WC_qiime_metadata_import.txt"
+)
+
+# factor variables with some contrasts
+sample_data(WC)$bird.code <- C(factor(sample_data(WC)$bird.code), sum)
+sample_data(WC)$year <- C(factor(sample_data(WC)$year), sum)
+sample_data(WC)$sex <- C(factor(sample_data(WC)$sex), sum)
+sample_data(WC)$group <- C(factor(sample_data(WC)$group), sum)
+sample_data(WC)$day <- C(factor(sample_data(WC)$day), sum)
+sample_data(WC)$seq.run <- C(factor(sample_data(WC)$seq.run), sum)
+sample_data(WC)$thawed <- C(factor(sample_data(WC)$thawed), sum)
+sample_data(WC)$swab.type <- C(factor(sample_data(WC)$swab.type), sum)
+```
+
+## Decontam 16S data
+
+I processed runs 1 and 2 through QIIME together so that they would have the same ASVs picked. However, for decontam I will separate them into their prospective runs, decontam separately according to the blanks that were associated with each run, then rearrange the data so that I have a group of fecal samples + donor and inoculum and a group of tracheal samples.  
+
+```{r split phyloseq into runs, include = FALSE, message = FALSE}
+WC1 <- subset_samples(WC, seq.run == "1")
+WC2 <- subset_samples(WC, seq.run == "2")
+```
+
+### Run 1 decontam
+
+First I will use the extraction blanks to identify contaminants. Using a threshold of 0.5, these are the taxa identified as contaminants:  
+
+```{r decontam R1 0.5, echo = FALSE, message = FALSE}
+# make new variable where blanks are "TRUE"
+sample_data(WC1)$is.neg <- sample_data(WC1)$sample.type == "blank"
+
+# run decontam
+contamdf.prevalence <- isContaminant(WC1, method="prevalence", neg="is.neg", threshold=0.5)
+
+# identify which taxa are contaminants
+contams <- which(contamdf.prevalence$contaminant)
+
+# list contaminants
+tax <- as(tax_table(WC1), "matrix")
+```
+
+```{r R1 contam table 0.5, echo = FALSE, render = lemon_print}
+# print number of contamninants and what they are
+as.data.frame(table(contamdf.prevalence$contaminant))
+as.data.frame(tax[contams,])
+```
+
+I will also make a plot that shows prevalence of taxa in the negatives and in true samples, to check how they are getting classified.  
+
+```{r decontam plot, echo = FALSE, message = FALSE}
+# make separate presence-absence phyloseq for controls and samples
+ps.pa <- transform_sample_counts(WC1, function(abund) 1*(abund>0))
+ps.pa.neg <- prune_samples(sample_data(ps.pa)$sample.type == "blank", ps.pa)
+ps.pa.pos <- prune_samples(sample_data(ps.pa)$sample.type == "fecal", ps.pa)
+
+# make dataframe for prevalence in controls and samples, plus whether it was identified as a contaminant
+df.pa <- data.frame(pa.pos=taxa_sums(ps.pa.pos), pa.neg=taxa_sums(ps.pa.neg),
+                    contaminant=contamdf.prevalence$contaminant)
+
+# plot prevalence and contaminant identification
+ggplot(data=df.pa, aes(x=pa.neg, y=pa.pos, color=contaminant)) +
+  geom_point() +
+  xlab("Prevalence (blanks)") +
+  ylab("Prevalence (samples)") +
+  ggtitle("Threshold = 0.5") +
+  geom_abline(slope = 1, intercept = 0)
+```
+
+I am not happy with how this identified contaminants. There are some that are still present in a very large number of samples and were only found in one contaminant. I am going to try lowering the strict threshold of 0.5 to 0.1 to see if that keeps some of these samples.  
+
+```{r decontam R1 0.1, echo = FALSE, message = FALSE}
+# run decontam
+contamdf.prevalence <- isContaminant(WC1, method="prevalence", neg="is.neg", threshold=0.1)
+
+# identify which taxa are contaminants
+contams <- which(contamdf.prevalence$contaminant)
+
+# list contaminants
+tax <- as(tax_table(WC1), "matrix")
+
+# make separate presence-absence phyloseq for controls and samples
+ps.pa <- transform_sample_counts(WC1, function(abund) 1*(abund>0))
+ps.pa.neg <- prune_samples(sample_data(ps.pa)$sample.type == "blank", ps.pa)
+ps.pa.pos <- prune_samples(sample_data(ps.pa)$sample.type == "fecal", ps.pa)
+
+# make dataframe for prevalence in controls and samples, plus whether it was identified as a contaminant
+df.pa <- data.frame(pa.pos=taxa_sums(ps.pa.pos), pa.neg=taxa_sums(ps.pa.neg),
+                    contaminant=contamdf.prevalence$contaminant)
+
+# plot prevalence and contaminant identification
+ggplot(data=df.pa, aes(x=pa.neg, y=pa.pos, color=contaminant)) +
+  geom_point() +
+  xlab("Prevalence (blanks)") +
+  ylab("Prevalence (samples)") +
+  ggtitle("Threshold = 0.1") +
+  geom_abline(slope = 1, intercept = 0)
+```
+
+```{r R1 contam table 0.1, echo = FALSE, render = lemon_print}
+# print number of contamninants and what they are
+as.data.frame(table(contamdf.prevalence$contaminant))
+as.data.frame(tax[contams,])
+```
+
+These make a bit more sense as contaminants. Now I just want to make sure that I am not removing too many samples by removing these contaminants. This table shows % of reads removed from each sample after removing contaminants. The first two samples are the two blanks.  
+
+```{r R1 remove contaminants, echo = FALSE, message = FALSE}
+# remove taxa from phyloseq
+WC1.decontam <- prune_taxa(!contamdf.prevalence$contaminant, WC1)
+
+# set up df with readcounts and % removed
+readcounts <- data.frame(matrix(ncol = 0, nrow = 124))
+readcounts$pre <- sample_sums(WC1)
+readcounts$post <- sample_sums(WC1.decontam)
+readcounts$percent.removed <- ((readcounts$pre - readcounts$post)/readcounts$pre) * 100
+
+readcounts$percent.removed
+```
+
+```{r R1 print table, echo = FALSE, render = lemon_print}
+# print otu table for contaminants
+as.data.frame(otu_table(WC1)) %>% slice(contams)
+```
+None of the samples lost more than 15/16 percent of their reads so I am good with the percent removed. The ASV table shows that some of them have higher read counts than in the blanks, but they are only in a few samples, and the blanks had much lower reads overall so that would skew the number.  
+
+6 taxa were identified as contaminants using a threshold of 0.1 (would be a good idea for me to articulate what this threshold means). I have removed these taxa from analysis.
+
+### Run 2 decontam
+
+First I will use the extraction blanks to identify contaminants. Using a threshold of 0.1 (given that was the best threshold for Run 1), these are the taxa identified as contaminants:  
+
+```{r decontam R2 0.1, echo = FALSE, message = FALSE}
+# make new variable where blanks are "TRUE"
+sample_data(WC2)$is.neg <- sample_data(WC2)$sample.type == "blank"
+
+# run decontam
+contamdf.prevalence <- isContaminant(WC2, method="prevalence", neg="is.neg", threshold=0.1)
+
+# identify which taxa are contaminants
+contams <- which(contamdf.prevalence$contaminant)
+
+# list contaminants
+tax <- as(tax_table(WC1), "matrix")
+```
+
+```{r R2 contam table 0.1, echo = FALSE, render = lemon_print}
+# print number of contamninants and what they are
+as.data.frame(table(contamdf.prevalence$contaminant))
+as.data.frame(tax[contams,])
+```
