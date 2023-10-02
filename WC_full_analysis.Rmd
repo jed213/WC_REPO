@@ -124,7 +124,7 @@ as.data.frame(tax[contams,])
 
 I will also make a plot that shows prevalence of taxa in the negatives and in true samples, to check how they are getting classified.  
 
-```{r decontam plot, echo = FALSE, message = FALSE}
+```{r R1 decontam plot 0.5, echo = FALSE, message = FALSE}
 # make separate presence-absence phyloseq for controls and samples
 ps.pa <- transform_sample_counts(WC1, function(abund) 1*(abund>0))
 ps.pa.neg <- prune_samples(sample_data(ps.pa)$sample.type == "blank", ps.pa)
@@ -145,7 +145,7 @@ ggplot(data=df.pa, aes(x=pa.neg, y=pa.pos, color=contaminant)) +
 
 I am not happy with how this identified contaminants. There are some that are still present in a very large number of samples and were only found in one contaminant. I am going to try lowering the strict threshold of 0.5 to 0.1 to see if that keeps some of these samples.  
 
-```{r decontam R1 0.1, echo = FALSE, message = FALSE}
+```{r R1 decontam 0.1, echo = FALSE, message = FALSE}
 # run decontam
 contamdf.prevalence <- isContaminant(WC1, method="prevalence", neg="is.neg", threshold=0.1)
 
@@ -206,7 +206,7 @@ None of the samples lost more than 15/16 percent of their reads so I am good wit
 
 First I will use the extraction blanks to identify contaminants. Using a threshold of 0.1 (given that was the best threshold for Run 1), these are the taxa identified as contaminants:  
 
-```{r decontam R2 0.1, echo = FALSE, message = FALSE}
+```{r R2 decontam 0.1, echo = FALSE, message = FALSE}
 # make new variable where blanks are "TRUE"
 sample_data(WC2)$is.neg <- sample_data(WC2)$sample.type == "blank"
 
@@ -225,3 +225,68 @@ tax <- as(tax_table(WC1), "matrix")
 as.data.frame(table(contamdf.prevalence$contaminant))
 as.data.frame(tax[contams,])
 ```
+
+I will also make a plot that shows prevalence of taxa in the negatives and in true samples, to check how they are getting classified.  
+
+```{r R2 decontam plot, echo = FALSE, message = FALSE}
+# make separate presence-absence phyloseq for controls and samples
+ps.pa <- transform_sample_counts(WC2, function(abund) 1*(abund>0))
+ps.pa.neg <- prune_samples(sample_data(ps.pa)$sample.type == "blank", ps.pa)
+ps.pa.pos <- prune_samples(sample_data(ps.pa)$sample.type != "blank", ps.pa)
+
+# make dataframe for prevalence in controls and samples, plus whether it was identified as a contaminant
+df.pa <- data.frame(pa.pos=taxa_sums(ps.pa.pos), pa.neg=taxa_sums(ps.pa.neg),
+                    contaminant=contamdf.prevalence$contaminant)
+
+# plot prevalence and contaminant identification
+ggplot(data=df.pa, aes(x=pa.neg, y=pa.pos, color=contaminant)) +
+  geom_point() +
+  xlab("Prevalence (blanks)") +
+  ylab("Prevalence (samples)") +
+  ggtitle("Threshold = 0.1") +
+  geom_abline(slope = 1, intercept = 0)
+```
+
+This looks fine to me. Again, I want to make sure that I am not removing too many samples by removing these contaminants. This table shows % of reads removed from each sample after removing contaminants. The first three samples are the blanks.  
+
+```{r R2 remove contaminants, echo = FALSE, message = FALSE}
+# remove taxa from phyloseq
+WC2.decontam <- prune_taxa(!contamdf.prevalence$contaminant, WC2)
+
+# set up df with readcounts and % removed
+readcounts <- data.frame(matrix(ncol = 0, nrow = 60))
+readcounts$pre <- sample_sums(WC2)
+readcounts$post <- sample_sums(WC2.decontam)
+readcounts$percent.removed <- ((readcounts$pre - readcounts$post)/readcounts$pre) * 100
+
+readcounts$percent.removed
+```
+
+```{r R2 print table, echo = FALSE, render = lemon_print}
+# print otu table for contaminants
+as.data.frame(otu_table(WC2)) %>% slice(contams)
+```
+None of the samples lost more than 7/8 percent of their reads so I am good with the percent removed.
+In the end, 38 taxa were identified and removed using a threshold of 0.1 (would be a good idea for me to articulate what this threshold means). I have removed these taxa from analysis.
+
+### Recombine groups and remove blanks
+
+Before proceeding to analysis, I now need to recombine the R1 and R2 groups into Fecal and Tracheal phyloseqs. There were two fecal samples (donor feces and inoculum) that were included in R2 that for analysis I need to group with R1.  
+
+During this step I will also remove the blanks.
+
+```{r split R2, message = FALSE}
+# isolate fecal from R2
+WC2F <- subset_samples(WC2, sample.type == "fecal")
+
+# isolate tracheal from R2
+WCT <- subset_samples(WC2, sample.type == "tracheal")
+
+# recombine R2 fecal with R1, and remove blanks
+WCF <- merge_phyloseq(WC1, WC2F)
+WCF <- subset_samples(WCF, sample.type == "fecal")
+```
+
+There are now two phyloseq objects: *WCF*, which contains the fecal samples (124 samples) and *WCT*, which contains the tracheal samples (55 samples). These will be used for further analysis.
+
+# Fecal 16S analysis
