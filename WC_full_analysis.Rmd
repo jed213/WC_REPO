@@ -30,6 +30,7 @@ library(ANCOMBC)
 library(tibble)
 library(tidyr)
 library(lemon)
+library(MicEco)
 ```
 
 ```{r set global parameters, include=FALSE}
@@ -37,7 +38,8 @@ theme_set(theme_classic())
 
 sc <- scale_color_manual(values = c("AR" = "#C34554", 
                                     "AR-FMT" = "#55B35E", 
-                                    "PR" = "#81B1F7")) 
+                                    "PR" = "#81B1F7",
+                                    "DI" = "gray")) 
 
 knit_print.data.frame <- lemon_print
 ```
@@ -75,7 +77,7 @@ WC <- qza_to_phyloseq(
   features = "table-filt-bytaxa.qza",
   tree = "rooted-tree.qza",
   taxonomy = "taxonomy.qza",
-  metadata = "WC_qiime_metadata_import.txt"
+  metadata = "WC_qiime_metadata_import2.txt"
 )
 
 # factor variables with some contrasts
@@ -289,4 +291,274 @@ WCF <- subset_samples(WCF, sample.type == "fecal")
 
 There are now two phyloseq objects: *WCF*, which contains the fecal samples (124 samples) and *WCT*, which contains the tracheal samples (55 samples). These will be used for further analysis.
 
+## Rarefy 16S data
+
+Now that I have the samples separated by fecal/tracheal, I can rarefy the respective groups for subsequent analysis.
+
+### Rarefy fecal
+
+First, I will look at read counts.
+
+```{r F read counts, echo = FALSE, render = lemon_print}
+# print read counts ordered from lowest to highest
+samples <- as.data.frame(sample_sums(WCF))
+arrange(samples, sample_sums(WCF))
+```
+
+Based on the read counts, I will rarefy at 16,378 which removes four samples: F386-14-2, F361-30-2, F391-50-2, and F383-30-2.
+
+```{r F rarefy, include=FALSE, message = FALSE}
+WCF.rare <- rarefy_even_depth(WCF, sample.size=16378, rngseed=14, verbose=TRUE) # rarefy
+```
+
+### Rarefy tracheal
+
+```{r T read counts, echo = FALSE, render = lemon_print}
+# print read counts ordered from lowest to highest
+samples <- as.data.frame(sample_sums(WCT))
+arrange(samples, sample_sums(WCT))
+```
+
+Based on the read counts, for now I will rarefy at 1073 which excludes four samples. In future, I would like to figure out a rarefaction curve for this data to see whether that is appropriate. Overall many of the reads have much lower counts than the fecal samples, but this is expected.
+
+```{r T rarefy, include=FALSE, message = FALSE}
+WCT.rare <- rarefy_even_depth(WCT, sample.size=1073, rngseed=14, verbose=TRUE) # rarefy
+```
+
 # Fecal 16S analysis
+
+This will use the *WCF.rare* phyloseq object, except for differential abundance analyses which will use *WCF*.
+
+## Alpha Diversity
+
+After rarefying, I can look at the initial alpha diversity plots to look for differences. DI = Donor/Inoculum.
+
+```{r F alpha all, echo = FALSE}
+plot_richness(WCF.rare, x="group")
+plot_richness(WCF.rare, x="sex")
+plot_richness(WCF.rare, x="year", color = "group")
+plot_richness(WCF.rare, x="day", color="group")
+```
+
+
+Some trends I see: PR might have slightly higher diversity than other groups (see Simpson especially), and the AR-FMT points seem to be a bit lower. Something is definitely going on with day 14. Also, the Donor/Inoculum definitely stick together which is great to see since the inoculum is derived from that fecal material. Generally the values seem to stay with what is typical overall.  
+
+Digging into differences between groups, I can plot diversity per group over time. I removed day 21 for these plots because only one group has any data points at day 21.
+
+```{r F alpha dataframe setup, include = FALSE, message = FALSE}
+# save alpha diversity calculations as alpha dataframe
+alpha <- microbiome::alpha(WCF.rare)
+
+# save phyloseq metadata as separate object, and add shannon and observed richness
+metaF.rare <- meta(WCF.rare) %>%
+  mutate(shannon = alpha$diversity_shannon) %>%
+  mutate(observed = alpha$observed)
+```
+
+Shannon diversity plot:  
+```{r F shannon over time, echo = FALSE}
+metaF.rare %>%
+  filter(day != "21") %>% # remove day 21 samples because only AR had it
+  ggplot(aes(x=day, y=shannon, group = group)) + sc +
+  geom_point(aes(color = group), position = position_dodge(width = 0.1), shape = 1, size = 3) +
+  stat_summary(fun=mean, geom = "line", linewidth = 1, aes(color = group)) +
+  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 0.5, na.rm = TRUE, aes(color = group)) +
+  stat_summary(fun=mean, geom = "point", size = 3, aes(color = group)) +
+  theme_classic(base_size = 15) +
+  ylab("shannon diversity")
+```
+
+```{r F richness over time, echo = FALSE}
+metaF.rare %>%
+  filter(day != "21") %>%
+  ggplot(aes(x=day, y=observed, group = group)) + sc +
+  geom_point(aes(color = group), position = position_dodge(width = 0.1), shape = 1, size = 3) +
+  stat_summary(fun=mean, geom = "line", linewidth = 1, aes(color = group)) +
+  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 0.5, na.rm = TRUE, aes(color = group)) +
+  stat_summary(fun=mean, geom = "point", size = 3, aes(color = group)) +
+  theme_classic(base_size = 15) +
+  ylab("observed richness")
+```
+
+Seems like potentially, richness converges over time between the three groups to an intermediate "adult" richness. 
+
+### Linear model (Shannon)
+*INCLUDE HERE*
+
+
+## Beta Diversity
+
+### Initial plots
+
+I will do some initial beta diversity plots to look for clustering patterns. I will do both Bray-Curtis and Jaccard.
+
+```{r F beta div setup, include = FALSE}
+# bray curtis
+BrayDistF <- distance(WCF.rare, method = "bray") # create bray dist matrix
+BrayOrdF <- ordinate(WCF.rare, "NMDS", distance = BrayDistF) # make NMDS ordination
+BrayPlotF <- plot_ordination(WCF.rare, BrayOrdF, justDF = TRUE) # make base NMDS dataframe for plotting
+
+# jaccard
+JaccDistF <- distance(WCF.rare, method = "jaccard") # create jaccard matrix
+JaccOrdF <- ordinate(WCF.rare, "NMDS", distance = JaccDistF) # make NMDS ordination
+JaccPlotF <- plot_ordination(WCF.rare, JaccOrdF, justDF = TRUE) # make base NMDS dataframe for plotting
+```
+
+Plots colored by group:  
+```{r F by group, echo = FALSE}
+# bray curtis
+BrayPlotF %>%
+  ggplot(aes(x=NMDS1, y=NMDS2)) + sc +
+  geom_point(size=4, aes(color = group)) +
+  labs(shape = "day")
+
+# jaccard
+JaccPlotF %>%
+  ggplot(aes(x=NMDS1, y=NMDS2)) + sc +
+  geom_point(size=4, aes(color = group)) +
+  labs(shape = "day")
+```
+
+Adding day as shape:  
+```{r F by group and day, echo = FALSE}
+# bray curtis
+BrayPlotF %>%
+  ggplot(aes(x=NMDS1, y=NMDS2)) + sc +
+  geom_point(size=4, aes(color = group, shape = day)) +
+  labs(shape = "day")
+
+# jaccard
+JaccPlotF %>%
+  ggplot(aes(x=NMDS1, y=NMDS2)) + sc +
+  geom_point(size=4, aes(color = group, shape = day)) +
+  labs(shape = "day")
+```
+
+Two main initial observations: First, relative abundance does not seem to be driving the differences between groups at all since bray-curtis and jaccard plots look pretty much identical. Future analyses that focus on presence/absence data might be more interesting than relative abundance data. Second, there seems to be some element of the beta diversity converging over time (I think). Still not sure what a good way to test this would be. *Maybe average distance to centroid over time?*
+
+### Venn diagram of shared taxa
+
+Unweighted and weighted: 
+
+```{r F venn shared taxa, message = FALSE, echo = FALSE}
+ps_venn(WCF, "group", quantities = list(type = c("percent", "counts"), font = 2), fill = c("red", "blue", "green"))
+ps_venn(WCF, "group", quantities = list(type = c("percent"), font = 2), fill = c("red", "blue", "green"), weight = TRUE, relative = TRUE)
+```
+
+# Tracheal 16S analysis
+
+## Alpha Diversity
+
+After rarefying, I can look at the initial alpha diversity plots to look for differences. DI = Donor/Inoculum.
+
+```{r T alpha all, echo = FALSE}
+plot_richness(WCT.rare, x="group")
+plot_richness(WCT.rare, x="sex")
+plot_richness(WCT.rare, x = "swab.type")
+plot_richness(WCT.rare, x="year", color = "group")
+plot_richness(WCT.rare, x="day", color="group")
+```
+
+I suspect that here we might be seeing a similar pattern to what was happening with the fecal richness (divergence at first with convergence over time). It was nice to see no obvious patterns according to swab type affecting richness.
+
+Digging into differences between groups, I can plot diversity per group over time.
+
+```{r T alpha dataframe setup, include = FALSE, message = FALSE}
+# save alpha diversity calculations as alpha dataframe
+alpha <- microbiome::alpha(WCT.rare)
+
+# save phyloseq metadata as separate object, and add shannon and observed richness
+metaT.rare <- meta(WCT.rare) %>%
+  mutate(shannon = alpha$diversity_shannon) %>%
+  mutate(observed = alpha$observed)
+```
+
+Shannon diversity plot:  
+```{r T shannon over time, echo = FALSE}
+metaT.rare %>%
+  filter(day != "21") %>% # remove day 21 samples because only AR had it
+  ggplot(aes(x=day, y=shannon, group = group)) + sc +
+  geom_point(aes(color = group), position = position_dodge(width = 0.1), shape = 1, size = 3) +
+  stat_summary(fun=mean, geom = "line", linewidth = 1, aes(color = group)) +
+  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 0.5, na.rm = TRUE, aes(color = group)) +
+  stat_summary(fun=mean, geom = "point", size = 3, aes(color = group)) +
+  theme_classic(base_size = 15) +
+  ylab("shannon diversity")
+```
+
+```{r T richness over time, echo = FALSE}
+metaT.rare %>%
+  filter(day != "21") %>%
+  ggplot(aes(x=day, y=observed, group = group)) + sc +
+  geom_point(aes(color = group), position = position_dodge(width = 0.1), shape = 1, size = 3) +
+  stat_summary(fun=mean, geom = "line", linewidth = 1, aes(color = group)) +
+  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 0.5, na.rm = TRUE, aes(color = group)) +
+  stat_summary(fun=mean, geom = "point", size = 3, aes(color = group)) +
+  theme_classic(base_size = 15) +
+  ylab("observed richness")
+```
+
+Contrary to the fecal richness, with the tracheal samples PR seems to separate more from AR/AR-FMT at the D70 timepoint. There is much more overlap between the groups at D14.
+
+### Linear model (Shannon)
+*INCLUDE HERE*
+
+## Beta Diversity
+
+### Initial plots
+
+I will do some initial beta diversity plots to look for clustering patterns. I will do both Bray-Curtis and Jaccard.
+
+```{r T beta div setup, include = FALSE}
+# bray curtis
+BrayDistT <- distance(WCT.rare, method = "bray") # create bray dist matrix
+BrayOrdT <- ordinate(WCT.rare, "NMDS", distance = BrayDistT) # make NMDS ordination
+BrayPlotT <- plot_ordination(WCT.rare, BrayOrdT, justDF = TRUE) # make base NMDS dataframe for plotting
+
+# jaccard
+JaccDistT <- distance(WCT.rare, method = "jaccard") # create jaccard matrix
+JaccOrdT <- ordinate(WCT.rare, "NMDS", distance = JaccDistT) # make NMDS ordination
+JaccPlotT <- plot_ordination(WCT.rare, JaccOrdT, justDF = TRUE) # make base NMDS dataframe for plotting
+```
+
+Plots colored by group:  
+```{r T by group, echo = FALSE}
+# bray curtis
+BrayPlotT %>%
+  ggplot(aes(x=NMDS1, y=NMDS2)) + sc +
+  geom_point(size=4, aes(color = group)) +
+  labs(shape = "day")
+
+# jaccard
+JaccPlotT %>%
+  ggplot(aes(x=NMDS1, y=NMDS2)) + sc +
+  geom_point(size=4, aes(color = group)) +
+  labs(shape = "day")
+```
+
+Adding day as shape:  
+```{r T by group and day, echo = FALSE}
+# bray curtis
+BrayPlotT %>%
+  ggplot(aes(x=NMDS1, y=NMDS2)) + sc +
+  geom_point(size=4, aes(color = group, shape = day)) +
+  labs(shape = "day")
+
+# jaccard
+JaccPlotT %>%
+  ggplot(aes(x=NMDS1, y=NMDS2)) + sc +
+  geom_point(size=4, aes(color = group, shape = day)) +
+  labs(shape = "day")
+```
+
+This is a similar clustering pattern to what we saw with the fecal samples. Again, there are quite similar patterns between bray curtis and jaccard. There still seems to be an element of clustering over time!
+
+### Venn diagram of shared taxa
+
+Unweighted and weighted: 
+
+```{r T venn shared taxa, message = FALSE, echo = FALSE}
+ps_venn(WCT, "group", quantities = list(type = c("percent", "counts"), font = 2), fill = c("red", "blue", "green"))
+ps_venn(WCT, "group", quantities = list(type = c("percent"), font = 2), fill = c("red", "blue", "green"), weight = TRUE, relative = TRUE)
+```
+
