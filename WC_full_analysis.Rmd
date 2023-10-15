@@ -383,8 +383,37 @@ metaF.rare %>%
 Seems like potentially, richness converges over time between the three groups to an intermediate "adult" richness. 
 
 ### Linear model (Shannon)
-*INCLUDE HERE*
+I am constructing a model to detect the factors influencing alpha diversity in these Whooping Crane samples. The potential explanatory factors I have are: Individual bird, year, sex, day, and group. I will remove the donor/inoculum from this analysis since there is not relevant metadata and this is not the subject of the analysis.  
 
+*According to Rachel, I might want to consider making this a GAM.*
+
+First I will make a pairs plot.  
+```{r F pairs, warning = FALSE, echo = FALSE, message = FALSE}
+# Make pairs plot
+meta.forpairs <- metaF.rare %>%
+  select(bird.code, year, sex, group, day, shannon, observed) %>%
+  filter(group != "DI")
+pairs(meta.forpairs, lower.panel=panel.smooth, diag.panel=panel.hist,
+upper.panel=panel.cor)
+```
+The shannon plot looks more even than observed richness so I will use that one for analysis. I will not look for collinearity since all of my explanatory variables are categorical.
+
+I will now do a linear mixed model with *shannon* as my response variable, *day*, *group*, *year* and *sex* as my explanatory variables, and *bird.code* as my random variable to correct for differences between birds. I will start with no interaction terms.  
+
+Model 1: Shannon ~ day + group + year + sex + random(bird.code)  
+
+Now I will fit the full model. I need to fit using maximum likelihood so that I can compare the later models which have different fixed effects. I am using the *nlme* package because the models will not converge (error: boundary (singular) fit: see help('isSingular')) when I try using *lme4*. This means I cannot use the dHARMA package for looking at residuals. 
+
+I can't get the linear mixed effects model to fit
+
+```{r fit model, echo = FALSE}
+metaF.no21 <- metaF.rare %>% 
+  filter(day != "21")
+
+model <- lme(shannon ~ day +group, data = metaF.rare, method = "ML",  random = ~bird.code)
+model <- lm(shannon ~ day + group + year + sex + bird.code, 
+             data = metaF.rare)
+```
 
 ## Beta Diversity
 
@@ -410,13 +439,15 @@ Plots colored by group:
 BrayPlotF %>%
   ggplot(aes(x=NMDS1, y=NMDS2)) + sc +
   geom_point(size=4, aes(color = group)) +
-  labs(shape = "day")
+  labs(shape = "day") + 
+  ggtitle("Bray Curtis")
 
 # jaccard
 JaccPlotF %>%
   ggplot(aes(x=NMDS1, y=NMDS2)) + sc +
   geom_point(size=4, aes(color = group)) +
-  labs(shape = "day")
+  labs(shape = "day") +
+  ggtitle("Jaccard")
 ```
 
 Adding day as shape:  
@@ -425,13 +456,15 @@ Adding day as shape:
 BrayPlotF %>%
   ggplot(aes(x=NMDS1, y=NMDS2)) + sc +
   geom_point(size=4, aes(color = group, shape = day)) +
-  labs(shape = "day")
+  labs(shape = "day") +
+  ggtitle("Bray Curtis")
 
 # jaccard
 JaccPlotF %>%
   ggplot(aes(x=NMDS1, y=NMDS2)) + sc +
   geom_point(size=4, aes(color = group, shape = day)) +
-  labs(shape = "day")
+  labs(shape = "day") +
+  ggtitle("Jaccard")
 ```
 
 Two main initial observations: First, relative abundance does not seem to be driving the differences between groups at all since bray-curtis and jaccard plots look pretty much identical. Future analyses that focus on presence/absence data might be more interesting than relative abundance data. Second, there seems to be some element of the beta diversity converging over time (I think). Still not sure what a good way to test this would be. *Maybe average distance to centroid over time?*
@@ -527,13 +560,15 @@ Plots colored by group:
 BrayPlotT %>%
   ggplot(aes(x=NMDS1, y=NMDS2)) + sc +
   geom_point(size=4, aes(color = group)) +
-  labs(shape = "day")
+  labs(shape = "day") +
+  ggtitle("Bray Curtis")
 
 # jaccard
 JaccPlotT %>%
   ggplot(aes(x=NMDS1, y=NMDS2)) + sc +
   geom_point(size=4, aes(color = group)) +
-  labs(shape = "day")
+  labs(shape = "day") +
+  ggtitle("Jaccard")
 ```
 
 Adding day as shape:  
@@ -542,13 +577,15 @@ Adding day as shape:
 BrayPlotT %>%
   ggplot(aes(x=NMDS1, y=NMDS2)) + sc +
   geom_point(size=4, aes(color = group, shape = day)) +
-  labs(shape = "day")
+  labs(shape = "day") +
+  ggtitle("Bray Curtis")
 
 # jaccard
 JaccPlotT %>%
   ggplot(aes(x=NMDS1, y=NMDS2)) + sc +
   geom_point(size=4, aes(color = group, shape = day)) +
-  labs(shape = "day")
+  labs(shape = "day") +
+  ggtitle("Jaccard")
 ```
 
 This is a similar clustering pattern to what we saw with the fecal samples. Again, there are quite similar patterns between bray curtis and jaccard. There still seems to be an element of clustering over time!

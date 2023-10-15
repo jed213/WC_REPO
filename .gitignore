@@ -3,10 +3,12 @@
 .RData
 .Ruserdata
 WC_fecal_analysis.html
-WC_fecal_analyais_files/
+WC_fecal_analysis_files/
 HighstatLibV10.R
 WC_full_analysis.html
 BA_SCFA_CS.xlsx
 taxonomy.qza
 table-filt-bytaxa.qza
 rooted-tree.qza
+WC_qiime_metadata*
+Campylobacter_table.png

@@ -132,7 +132,7 @@ This step was required because many of my samples were sequenced twice due to qu
 # remove sample duplicates based on what is in the metadata file
 qiime feature-table filter-samples \
   --i-table table.qza \
-  --m-metadata-file fecal_qiime_metadata_corrected.txt \
+  --m-metadata-file WC_qiime_metadata.txt \
   --o-filtered-table table-filtered.qza
 ```
 
@@ -145,7 +145,7 @@ We can now visualize number of features (reads) per sample. This should match wh
 qiime feature-table summarize \
   --i-table table-filtered.qza \
   --o-visualization table-filtered.qzv \
-  --m-sample-metadata-file fecal_qiime_metadata_corrected.txt
+  --m-sample-metadata-file WC_qiime_metadata.txt
   
 # download .qzv file and view through view.qiime2.org
 ```

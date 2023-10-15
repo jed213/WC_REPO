@@ -73,3 +73,81 @@ qiime demux summarize \
   
 # download .qzv file and view through view.qiime2.org
 ```
+
+The sequencing facility did not remove the primers (ITS1F (CTTGGTCATTTAGAGGAAGTAA) ITS2R (GCTGCGTTCTTCATCGATGC)). Based on that and the sequence quality, I trimmed using the following parameters. 220 may be a bit lenient, but I can always trim more if something seems off. That is about when quality scores drop below 20. I did this through a bash script instead of an interactive job. 
+
+```{bash dada2, eval = FALSE}
+#!/bin/bash
+#SBATCH --partition=htc
+#SBATCH --job-name=dada2.X
+#SBATCH --output=outs/dada2.X.out
+#SBATCH --error=errs/dada2.X.err
+#SBATCH --time=0-10:00:00
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mail-type=END,FAIL
+#SBATCH --mail-user=jed213@pitt.edu
+
+module load qiime2/2023.5
+
+# trim reads based on sequence length and quality
+qiime dada2 denoise-paired \
+  --i-demultiplexed-seqs paired-end-demux.qza \
+  --o-table table.qza \
+  --o-representative-sequences rep-seqs.qza \
+  --p-n-threads 0 \
+  --verbose \
+  --p-trunc-len-f 220 \
+  --p-trunc-len-r 220 \
+  --p-trim-left-f 22 \
+  --p-trim-left-r 20 \
+  --o-denoising-stats denoising-stats.qza
+
+# visualize number of reads that passed each filter at each step
+qiime metadata tabulate \
+  --m-input-file denoising-stats.qza \
+  --o-visualization denoising-stats.qzv
+
+# download .qzv file and view through view.qiime2.org
+```
+
+Running this gives two important file outputs: table.qza and rep-seqs.qza. It also gives a stats output. At this point we can look at stats from this project, and visualize the number of reads that passed each filter at each step. 
+
+I am pretty happy with how the blanks and samples look here. Blanks (extraction and PCR) had <20% reads pass (many had 0), and the samples tend to have around 70-80%.
+
+## Step 5: Set up metadata file
+
+The next steps will require a QIIME2-compatible metadata file. Instructions on proper format are here https://gregcaporaso.github.io/q2book/using/metadata.html. Note that sample names should be in the exact format as they were in the manifest file. Also, any samples not included here will be discarded from the rest of the analysis (so include only the desired copy of any samples that were sequenced twice, and make sure to include blanks). My file is *WC_qiime_ITS_metadata.txt*. There are 62 samples total including blanks.
+
+## More visualization
+
+We can now visualize number of features (reads) per sample. This should match what was in denoising-stats.qzv.
+
+```{bash visualize reads, eval = FALSE}
+# visualize number of features per sample
+qiime feature-table summarize \
+  --i-table table.qza \
+  --o-visualization table.qzv \
+  --m-sample-metadata-file WC_qiime_ITS_metadata.txt
+  
+# download .qzv file and view through view.qiime2.org
+```
+
+We can also look at what the specific sequences were for each feature. Typically not needed.
+
+```{bash visualize sequences, eval = FALSE}
+# visualize sequences for each feature
+qiime feature-table tabulate-seqs \
+  --i-data rep-seqs.qza \
+  --o-visualization rep-seqs.qzv
+
+# download .qzv file and view through view.qiime2.org
+```
+
+## Step 7: Create phylogenetic trees and classify taxonomy
+
+In order to do other steps, we need a phylogeny for these samples so that we can then assign taxa to the specific features in this dataset. Instead of training it myself (I may do this in future), I will be using a pre-trained classifier found here https://github.com/colinbrislawn/unite-train/releases.
+
+This should also be run through a bash script. Note, this script should be run from outside the main folder, not within it.
+
