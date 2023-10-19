@@ -147,7 +147,72 @@ qiime feature-table tabulate-seqs \
 
 ## Step 7: Create phylogenetic trees and classify taxonomy
 
-In order to do other steps, we need a phylogeny for these samples so that we can then assign taxa to the specific features in this dataset. Instead of training it myself (I may do this in future), I will be using a pre-trained classifier found here https://github.com/colinbrislawn/unite-train/releases.
+In order to do other steps, we need a phylogeny for these samples so that we can then assign taxa to the specific features in this dataset. For now, I will be using a pre-trained UNITE classifier found here https://github.com/colinbrislawn/unite-train/releases, but in future would like to train my own.
 
 This should also be run through a bash script. Note, this script should be run from outside the main folder, not within it.
 
+```{bash classify, eval = FALSE}
+#!/bin/bash
+#SBATCH --partition=htc
+#SBATCH --job-name=classify
+#SBATCH --output=mainITS/outs/classify.1.out
+#SBATCH --error=mainITS/errs/classify.1.err
+#SBATCH --time=0-10:00:00
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mail-type=END,FAIL
+#SBATCH --mail-user=jed213@pitt.edu
+
+module load qiime2/2023.5
+
+# create phylogenetic trees
+qiime phylogeny align-to-tree-mafft-fasttree \
+  --i-sequences mainITS/rep-seqs.qza \
+  --o-alignment mainITS/aligned-rep-seqs.qza \
+  --o-masked-alignment mainITS/masked-aligned-rep-seqs.qza \
+  --o-tree mainITS/unrooted-tree.qza \
+  --o-rooted-tree mainITS/rooted-tree.qza
+
+# classify features to taxa according to the Greengenes database
+qiime feature-classifier classify-sklearn \
+  --i-classifier training-feature-classifiers/unite_ver9_dynamic_25.07.2023-Q2-2023.5.qza \
+  --i-reads mainITS/rep-seqs.qza \
+  --o-classification mainITS/taxonomy.qza
+
+# visualize each feature associaton with taxa and confidence
+qiime metadata tabulate \
+  --m-input-file mainITS/taxonomy.qza \
+  --o-visualization mainITS/taxonomy.qzv
+  
+# download .qzv file and view through view.qiime2.org
+```
+
+## Step 8: Filter table based on taxonomy
+
+I don't think I need to filter out any taxonomy, things seem to all be in the Fungi Kingdom but the taxa-bar-plots.qzv can show me if that is not the case.
+
+```{bash visualize taxa, eval = FALSE}
+# create taxa visualization
+qiime taxa barplot \
+  --i-table table-filt-bytaxa.qza \
+  --i-taxonomy taxonomy.qza \
+  --m-metadata-file WC_qiime_metadata.txt \
+  --o-visualization taxa-bar-plots.qzv
+  
+# download .qzv file and view through view.qiime2.org
+```
+
+Now the files can be imported into R for analysis. I will need the taxonomy.qza, table.qza, rooted-tree.qza, and WC_qiime_ITS_metadata.txt.  
+
+Before proceeding, I will generate quick beta div plots in qiime to see how things are looking.
+
+```{bash beta diversity, eval = FALSE}
+# generate core metrics
+qiime diversity core-metrics-phylogenetic \
+  --i-phylogeny rooted-tree.qza \
+  --i-table table.qza \
+  --p-sampling-depth 1230
+  --m-metadata-file WC_qiime_ITS_metadata.txt \
+  --output-dir core-metrics-results
+```

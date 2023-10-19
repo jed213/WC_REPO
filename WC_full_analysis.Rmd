@@ -91,6 +91,11 @@ sample_data(WC)$thawed <- C(factor(sample_data(WC)$thawed), sum)
 sample_data(WC)$swab.type <- C(factor(sample_data(WC)$swab.type), sum)
 ```
 
+## Import metabolomics data
+```{r import metabolomics}
+BA_SCFA_CS <- read_excel("BA_SCFA_CS.xlsx")
+```
+
 ## Decontam 16S data
 
 I processed runs 1 and 2 through QIIME together so that they would have the same ASVs picked. However, for decontam I will separate them into their prospective runs, decontam separately according to the blanks that were associated with each run, then rearrange the data so that I have a group of fecal samples + donor and inoculum and a group of tracheal samples.  
@@ -325,6 +330,229 @@ Based on the read counts, for now I will rarefy at 1073 which excludes four samp
 WCT.rare <- rarefy_even_depth(WCT, sample.size=1073, rngseed=14, verbose=TRUE) # rarefy
 ```
 
+# Metabolomics
+
+I have data for 11 bile acids, 8 SCFAs, and corticosterone.
+
+## Bile Acids
+
+First, I will isolate the BA specific part of the dataset.
+
+```{r BA data manipulation, echo = FALSE}
+# turn bile acid data into long form table for plotting
+BA <- BA_SCFA_CS %>% 
+  select(Sample, Sex, Day, Group, alpha.MCA, beta.MCA, CDCA, CA, gamma.MCA, GCA, omega.MCA, TCDCA, TCA, TDCA, TLCA) %>% 
+  pivot_longer(-c(Sample, Sex, Day, Group), names_to = "BA", values_to = "nmol_g_stool")
+```
+
+For plotting, I first want to look at the levels of all the different BAs over time.  
+
+```{r BA plots, warning = FALSE, echo = FALSE}
+# all samples, BA over time
+BA %>% 
+  ggplot(aes(x = Day, y = log(nmol_g_stool), color = BA)) +
+  geom_point(aes(color = BA), position = position_dodge(width = 0.1), shape = 1, size = 3) +
+  stat_summary(fun=mean, geom = "line", linewidth = 1, aes(color = BA)) +
+  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 0.5, na.rm = TRUE, aes(color = BA)) +
+  stat_summary(fun=mean, geom = "point", size = 3, aes(color = BA)) +
+  theme_classic(base_size = 15)
+
+# just PR, BA over time
+BA %>% 
+  filter(Group == "PR") %>% 
+  ggplot(aes(x = Day, y = log(nmol_g_stool), color = BA)) +
+  geom_point(aes(color = BA), position = position_dodge(width = 0.1), shape = 1, size = 3) +
+  stat_summary(fun=mean, geom = "line", linewidth = 1, aes(color = BA)) +
+  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 0.5, na.rm = TRUE, aes(color = BA)) +
+  stat_summary(fun=mean, geom = "point", size = 3, aes(color = BA)) +
+  theme_classic(base_size = 15) + 
+  ggtitle("PR")
+
+# just AR, BA over time
+BA %>% 
+  filter(Group == "AR") %>% 
+  ggplot(aes(x = Day, y = log(nmol_g_stool), color = BA)) +
+  geom_point(aes(color = BA), position = position_dodge(width = 0.1), shape = 1, size = 3) +
+  stat_summary(fun=mean, geom = "line", linewidth = 1, aes(color = BA)) +
+  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 0.5, na.rm = TRUE, aes(color = BA)) +
+  stat_summary(fun=mean, geom = "point", size = 3, aes(color = BA)) +
+  theme_classic(base_size = 15) + 
+  ggtitle("AR")
+
+# just AR-FMT, BA over time
+BA %>% 
+  filter(Group == "AR-FMT") %>% 
+  ggplot(aes(x = Day, y = log(nmol_g_stool), color = BA)) +
+  geom_point(aes(color = BA), position = position_dodge(width = 0.1), shape = 1, size = 3) +
+  stat_summary(fun=mean, geom = "line", linewidth = 1, aes(color = BA)) +
+  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 0.5, na.rm = TRUE, aes(color = BA)) +
+  stat_summary(fun=mean, geom = "point", size = 3, aes(color = BA)) +
+  theme_classic(base_size = 15) + 
+  ggtitle("AR-FMT")
+```
+
+Almost all the bile acids seem to stay pretty consistent over time. Some increase of TDCA and TLCA over time.
+
+Next I will split it by group, within each day.
+
+```{r BA plots by day, warning = FALSE}
+# day 14
+BA %>% 
+  filter(Day == "14") %>% 
+  ggplot(aes(x = Group, y = log(nmol_g_stool), color = Group)) +
+  geom_point() +
+  facet_wrap(vars(BA)) +
+  ggtitle("Day 14")
+
+# day 30
+BA %>% 
+  filter(Day == "30") %>% 
+  ggplot(aes(x = Group, y = log(nmol_g_stool), color = Group)) +
+  geom_point() +
+  facet_wrap(vars(BA)) +
+  ggtitle("Day 30")
+
+# day 50
+BA %>% 
+  filter(Day == "50") %>% 
+  ggplot(aes(x = Group, y = log(nmol_g_stool), color = Group)) +
+  geom_point() +
+  facet_wrap(vars(BA)) +
+  ggtitle("Day 50")
+
+# day 70
+BA %>% 
+  filter(Day == "70") %>% 
+  ggplot(aes(x = Group, y = log(nmol_g_stool), color = Group)) +
+  geom_point() +
+  facet_wrap(vars(BA)) +
+  ggtitle("Day 70")
+```
+
+I am not seeing any obvious differences between groups.
+
+## SCFA
+
+First, I will isolate the SCFA specific part of the dataset.
+
+```{r SCFA data manipulation, echo = FALSE}
+# turn SCFA data into long form table for plotting
+SCFA <- BA_SCFA_CS %>% 
+  select(Sample, Sex, Day, Group, Acetic.Acid, Propionic.Acid, Isobutyric.Acid, 
+         Butyric.Acid, Isovaleric.Acid, Valeric.Acid, Isocaproic.Acid, Caproic.Acid) %>% 
+  pivot_longer(-c(Sample, Sex, Day, Group), names_to = "SCFA", values_to = "umol_g_stool")
+```
+
+For plotting, I first want to look at the levels of all the different SCFAs over time.  
+
+```{r SCFA plots, warning = FALSE, echo = FALSE}
+# all samples, SCFA over time
+SCFA %>% 
+  ggplot(aes(x = Day, y = log(umol_g_stool), color = SCFA)) +
+  geom_point(aes(color = SCFA), position = position_dodge(width = 0.1), shape = 1, size = 3) +
+  stat_summary(fun=mean, geom = "line", linewidth = 1, aes(color = SCFA)) +
+  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 0.5, na.rm = TRUE, aes(color = SCFA)) +
+  stat_summary(fun=mean, geom = "point", size = 3, aes(color = SCFA)) +
+  theme_classic(base_size = 15)
+
+# just PR, SCFA over time
+SCFA %>% 
+  filter(Group == "PR") %>% 
+  ggplot(aes(x = Day, y = log(umol_g_stool), color = SCFA)) +
+  geom_point(aes(color = SCFA), position = position_dodge(width = 0.1), shape = 1, size = 3) +
+  stat_summary(fun=mean, geom = "line", linewidth = 1, aes(color = SCFA)) +
+  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 0.5, na.rm = TRUE, aes(color = SCFA)) +
+  stat_summary(fun=mean, geom = "point", size = 3, aes(color = SCFA)) +
+  theme_classic(base_size = 15) + 
+  ggtitle("PR")
+
+# just AR, SCFA over time
+SCFA %>% 
+  filter(Group == "AR") %>% 
+  ggplot(aes(x = Day, y = log(umol_g_stool), color = SCFA)) +
+  geom_point(aes(color = SCFA), position = position_dodge(width = 0.1), shape = 1, size = 3) +
+  stat_summary(fun=mean, geom = "line", linewidth = 1, aes(color = SCFA)) +
+  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 0.5, na.rm = TRUE, aes(color = SCFA)) +
+  stat_summary(fun=mean, geom = "point", size = 3, aes(color = SCFA)) +
+  theme_classic(base_size = 15) + 
+  ggtitle("AR")
+
+# just AR-FMT, SCFA over time
+SCFA %>% 
+  filter(Group == "AR-FMT") %>% 
+  ggplot(aes(x = Day, y = log(umol_g_stool), color = SCFA)) +
+  geom_point(aes(color = SCFA), position = position_dodge(width = 0.1), shape = 1, size = 3) +
+  stat_summary(fun=mean, geom = "line", linewidth = 1, aes(color = SCFA)) +
+  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 0.5, na.rm = TRUE, aes(color = SCFA)) +
+  stat_summary(fun=mean, geom = "point", size = 3, aes(color = SCFA)) +
+  theme_classic(base_size = 15) + 
+  ggtitle("AR-FMT")
+```
+
+Again no very obvious trends, maybe some decrease of Isocaproic acid.
+
+Next I will split it by group, within each day.
+
+```{r SCFA plots by day, warning = FALSE}
+# day 14
+SCFA %>% 
+  filter(Day == "14") %>% 
+  ggplot(aes(x = Group, y = log(umol_g_stool), color = Group)) +
+  geom_point() +
+  facet_wrap(vars(SCFA)) +
+  ggtitle("Day 14")
+
+# day 30
+SCFA %>% 
+  filter(Day == "30") %>% 
+  ggplot(aes(x = Group, y = log(umol_g_stool), color = Group)) +
+  geom_point() +
+  facet_wrap(vars(SCFA)) +
+  ggtitle("Day 30")
+
+# day 50
+SCFA %>% 
+  filter(Day == "50") %>% 
+  ggplot(aes(x = Group, y = log(umol_g_stool), color = Group)) +
+  geom_point() +
+  facet_wrap(vars(SCFA)) +
+  ggtitle("Day 50")
+
+# day 70
+SCFA %>% 
+  filter(Day == "70") %>% 
+  ggplot(aes(x = Group, y = log(umol_g_stool), color = Group)) +
+  geom_point() +
+  facet_wrap(vars(SCFA)) +
+  ggtitle("Day 70")
+```
+
+Again, no obvious differences between groups.
+
+## Corticosterone
+
+First, I will isolate the corticosterone specific part of the dataset.
+
+```{r Cort data manipulation, echo = FALSE}
+# turn cort data into long form table for plotting
+CORT <- BA_SCFA_CS %>% 
+  select(Sample, Sex, Day, Group, Corticosterone)
+```
+
+Now cort over time, separated by group.
+
+```{r Cort plotting over time, warning = FALSE}
+CORT %>% 
+  ggplot(aes(x = Day, y = Corticosterone, color = Group)) +
+  geom_point(position = position_dodge(width = 0.1), shape = 1, size = 3) +
+  stat_summary(fun=mean, geom = "line", linewidth = 1) +
+  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 0.5, na.rm = TRUE) +
+  stat_summary(fun=mean, geom = "point", size = 3) +
+  theme_classic(base_size = 15)
+```
+
+PR seems to start really high (and may be a bit higher overall), through there are not many data points at D14. I believe there may be some data in the literature that would support PR having higher cort.
+
 # Fecal 16S analysis
 
 This will use the *WCF.rare* phyloseq object, except for differential abundance analyses which will use *WCF*.
@@ -396,23 +624,26 @@ meta.forpairs <- metaF.rare %>%
 pairs(meta.forpairs, lower.panel=panel.smooth, diag.panel=panel.hist,
 upper.panel=panel.cor)
 ```
+
+------------------------ still working below this line ------------
+
 The shannon plot looks more even than observed richness so I will use that one for analysis. I will not look for collinearity since all of my explanatory variables are categorical.
 
-I will now do a linear mixed model with *shannon* as my response variable, *day*, *group*, *year* and *sex* as my explanatory variables, and *bird.code* as my random variable to correct for differences between birds. I will start with no interaction terms.  
+I will now do a linear mixed model with *shannon* as my response variable, *day*, *group*, *year* and *sex* as my explanatory variables, and *bird.code* as my random variable to correct for differences between birds. I will start with no interaction terms.
 
-Model 1: Shannon ~ day + group + year + sex + random(bird.code)  
+Model 1: Shannon ~ day + group + year + sex + random(bird.code)
 
-Now I will fit the full model. I need to fit using maximum likelihood so that I can compare the later models which have different fixed effects. I am using the *nlme* package because the models will not converge (error: boundary (singular) fit: see help('isSingular')) when I try using *lme4*. This means I cannot use the dHARMA package for looking at residuals. 
+Now I will fit the full model. I need to fit using maximum likelihood so that I can compare the later models which have different fixed effects. I am using the *nlme* package because the models will not converge (error: boundary (singular) fit: see help('isSingular')) when I try using *lme4*. This means I cannot use the dHARMA package for looking at residuals.
 
 I can't get the linear mixed effects model to fit
 
 ```{r fit model, echo = FALSE}
-metaF.no21 <- metaF.rare %>% 
-  filter(day != "21")
-
-model <- lme(shannon ~ day +group, data = metaF.rare, method = "ML",  random = ~bird.code)
-model <- lm(shannon ~ day + group + year + sex + bird.code, 
-             data = metaF.rare)
+# metaF.no21 <- metaF.rare %>%
+#   filter(day != "21")
+# 
+# model <- lme(shannon ~ day +group, data = metaF.rare, method = "ML",  random = ~bird.code)
+# model <- lm(shannon ~ day + group + year + sex + bird.code,
+#              data = metaF.rare)
 ```
 
 ## Beta Diversity
