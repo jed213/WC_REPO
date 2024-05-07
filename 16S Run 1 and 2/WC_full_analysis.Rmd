@@ -18,7 +18,7 @@ library(dplyr)
 library(ggplot2)
 library(vegan)
 library(decontam)
-library(nlme)
+library(lme4)
 library(rmdformats)
 library(microbiomer)
 library(car)
@@ -31,6 +31,7 @@ library(tibble)
 library(tidyr)
 library(lemon)
 library(MicEco)
+library(readxl)
 ```
 
 ```{r set global parameters, include=FALSE}
@@ -56,7 +57,7 @@ data.summary <- function(x) {
 
 This document is intended to show the full analysis of the Whooping Crane data. Included in this analysis are:  
 * 122 fecal samples spread across 34 chicks, 5 years, and 5 timepoints  
-* ? tracheal samples spread across ? chicks, ? years, and 2 timepoints  
+* 55 tracheal samples spread across 28 chicks, 5 years, and 2 timepoints  
 
 These results were sequenced over three runs:  
 1) Run 1 included the fecal sample 16S sequencing plus 2 extraction blanks  
@@ -395,7 +396,7 @@ Almost all the bile acids seem to stay pretty consistent over time. Some increas
 
 Next I will split it by group, within each day.
 
-```{r BA plots by day, warning = FALSE}
+```{r BA plots by day, warning = FALSE, echo = FALSE}
 # day 14
 BA %>% 
   filter(Day == "14") %>% 
@@ -493,7 +494,7 @@ Again no very obvious trends, maybe some decrease of Isocaproic acid.
 
 Next I will split it by group, within each day.
 
-```{r SCFA plots by day, warning = FALSE}
+```{r SCFA plots by day, warning = FALSE, echo = FALSE}
 # day 14
 SCFA %>% 
   filter(Day == "14") %>% 
@@ -539,19 +540,28 @@ CORT <- BA_SCFA_CS %>%
   select(Sample, Sex, Day, Group, Corticosterone)
 ```
 
-Now cort over time, separated by group.
+Now cort over time, separated by group and gender.
 
-```{r Cort plotting over time, warning = FALSE}
+```{r Cort plotting over time, warning = FALSE, echo = FALSE}
 CORT %>% 
-  ggplot(aes(x = Day, y = Corticosterone, color = Group)) +
+  ggplot(aes(x = Day, y = Corticosterone, color = Group, shape = Sex)) +
   geom_point(position = position_dodge(width = 0.1), shape = 1, size = 3) +
   stat_summary(fun=mean, geom = "line", linewidth = 1) +
   stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 0.5, na.rm = TRUE) +
-  stat_summary(fun=mean, geom = "point", size = 3) +
-  theme_classic(base_size = 15)
+  stat_summary(fun=mean, geom = "point", size = 5) +
+  theme_classic(base_size = 15) +
+  ylab("Corticosterone (ng/g)")
 ```
 
-PR seems to start really high (and may be a bit higher overall), through there are not many data points at D14. I believe there may be some data in the literature that would support PR having higher cort.
+PR seems to start really high (and may be a bit higher overall), through there are not many data points at D14. Female PR cranes specifically had higher cort (need to test statistically), which actually repeats a finding from Barry's paper (Brown et al). I need to test this statistically.  
+
+### Corticosterone stats
+
+```{r Cort stats, warning = FALSE, echo = FALSE}
+model <- lm(Corticosterone ~ Day + Group * Sex, data = CORT)
+summary(model)
+car::Anova(model)
+```
 
 # Fecal 16S analysis
 
@@ -610,13 +620,45 @@ metaF.rare %>%
 
 Seems like potentially, richness converges over time between the three groups to an intermediate "adult" richness. 
 
+### Additive plots for talks
+
+These plots remove one group at a time, for use in talks.
+
+```{r F shannon over time additive, include = FALSE}
+# these plots were generated for my rotation talk, to add in data sequentially
+
+# shannon but no AR-FMT group
+metaF.rare %>%
+  filter(day != "21") %>% # remove day 21 samples because only AR had it
+  ggplot(aes(x=day, y=shannon, group = group, alpha = group)) + sc +
+  scale_alpha_manual(values = c(1, 0, 1, 1)) +
+  geom_point(aes(color = group), position = position_dodge(width = 0.1), shape = 1, size = 3) +
+  stat_summary(fun=mean, geom = "line", linewidth = 1, aes(color = group)) +
+  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 0.5, na.rm = TRUE, aes(color = group)) +
+  stat_summary(fun=mean, geom = "point", size = 3, aes(color = group)) +
+  theme_classic(base_size = 15) +
+  ylab("shannon diversity")
+
+# shannon but no AR-FMT or AR group
+metaF.rare %>%
+  filter(day != "21") %>% # remove day 21 samples because only AR had it
+  ggplot(aes(x=day, y=shannon, group = group, alpha = group)) + sc +
+  scale_alpha_manual(values = c(0, 0, 1, 1)) +
+  geom_point(aes(color = group), position = position_dodge(width = 0.1), shape = 1, size = 3) +
+  stat_summary(fun=mean, geom = "line", linewidth = 1, aes(color = group)) +
+  stat_summary(fun.data = data.summary, geom = "errorbar", linewidth = 1, width = 0.5, na.rm = TRUE, aes(color = group)) +
+  stat_summary(fun=mean, geom = "point", size = 3, aes(color = group)) +
+  theme_classic(base_size = 15) +
+  ylab("shannon diversity")
+```
+
 ### Linear model (Shannon)
 I am constructing a model to detect the factors influencing alpha diversity in these Whooping Crane samples. The potential explanatory factors I have are: Individual bird, year, sex, day, and group. I will remove the donor/inoculum from this analysis since there is not relevant metadata and this is not the subject of the analysis.  
 
 *According to Rachel, I might want to consider making this a GAM.*
 
 First I will make a pairs plot.  
-```{r F pairs, warning = FALSE, echo = FALSE, message = FALSE}
+```{r F alpha pairs, warning = FALSE, echo = FALSE, message = FALSE}
 # Make pairs plot
 meta.forpairs <- metaF.rare %>%
   select(bird.code, year, sex, group, day, shannon, observed) %>%
@@ -625,25 +667,76 @@ pairs(meta.forpairs, lower.panel=panel.smooth, diag.panel=panel.hist,
 upper.panel=panel.cor)
 ```
 
------------------------- still working below this line ------------
-
-The shannon plot looks more even than observed richness so I will use that one for analysis. I will not look for collinearity since all of my explanatory variables are categorical.
+The shannon plot looks more even than observed richness so I will use that one for analysis. I will not look for collinearity since all of my explanatory variables are categorical. I will also remove the DI group from this analysis.
 
 I will now do a linear mixed model with *shannon* as my response variable, *day*, *group*, *year* and *sex* as my explanatory variables, and *bird.code* as my random variable to correct for differences between birds. I will start with no interaction terms.
 
-Model 1: Shannon ~ day + group + year + sex + random(bird.code)
+Model 1: shannon ~ day + group + year + sex + random(bird.code)
 
-Now I will fit the full model. I need to fit using maximum likelihood so that I can compare the later models which have different fixed effects. I am using the *nlme* package because the models will not converge (error: boundary (singular) fit: see help('isSingular')) when I try using *lme4*. This means I cannot use the dHARMA package for looking at residuals.
+Now I will fit the full model. I need to fit using maximum likelihood so that I can compare the later models which have different fixed effects. I am using the *lme4* package.
 
-I can't get the linear mixed effects model to fit
+```{r F alpha fit model, echo = FALSE, warning = FALSE}
+metaF.noDI <- metaF.rare %>%
+  filter(year != "DI")
 
-```{r fit model, echo = FALSE}
-# metaF.no21 <- metaF.rare %>%
-#   filter(day != "21")
-# 
-# model <- lme(shannon ~ day +group, data = metaF.rare, method = "ML",  random = ~bird.code)
-# model <- lm(shannon ~ day + group + year + sex + bird.code,
-#              data = metaF.rare)
+model <- lmer(shannon ~ day + group + year + sex + (1 | bird.code), data = metaF.noDI, REML = F)
+summary(model)
+```
+Now I will compare the AIC to other model variations. Namely:  
+1. shannon ~ day + group + year + random(bird.code)
+2. shannon ~ day + group + random(bird.code)
+3. shannon ~ day * group + year + random(bird.code)
+4. shannon ~ day * group + random(bird.code)
+5. shannon ~ day * group + year + sex + random(bird.code)
+
+```{r F alpha model comparison, echo = FALSE, warning = FALSE}
+model1 <- lmer(shannon ~ day + group + year + (1 | bird.code), data = metaF.noDI, REML = F)
+model2 <- lmer(shannon ~ day + group + (1 | bird.code), data = metaF.noDI, REML = F)
+model3 <- lmer(shannon ~ day * group + year + (1 | bird.code), data = metaF.noDI, REML = F)
+model4 <- lmer(shannon ~ day * group + (1 | bird.code), data = metaF.noDI, REML = F)
+model5 <- lmer(shannon ~ day * group + year + sex + (1 | bird.code), data = metaF.noDI, REML = F)
+```
+
+All the models ran, now I can compare AICs (note: these do give warnings about the fixed-effect model matrix being rank deficient or boundary (singular) fit).
+
+```{r F alpha compare AIC, echo = FALSE, warning = FALSE}
+AIC(model)
+AIC(model1)
+AIC(model2)
+AIC(model3)
+AIC(model4)
+AIC(model5)
+```
+
+Based on AICs, the best model is the full model with an interaction term between day and group (model 5). This is only slightly better than the model that excludes sex. Now I will check for model validation.
+
+```{r F alpha model validation, echo = FALSE, warning = FALSE}
+# Residuals vs fitted values
+plot(residuals(model5, type="response") ~ fitted(model5))
+abline(0,0,col="gray")
+```
+
+These residuals look fine to me. Can proceed with model interpretation.
+
+```{r F alpha model results, echo = FALSE, warning = FALSE, message = FALSE}
+summary(model5)
+
+# test significance of terms
+car::Anova(model5)
+```
+
+Day, group, year, and the interaction between day and group are significant. I will proceed with post-hoc tests to test pairwise differences.
+
+### Pairwise post-hoc tests
+
+Now I will do post-hoc tests between all my combinations of groups to see what is statistically different from each other. I am using a multiple comparison with Tukey adjustment through the methods described here: https://biostats.w.uib.no/post-hoc-tests-multiple-comparisons-in-linear-models-2/  
+
+```{r F alpha tukey, echo = FALSE}
+# gives means for each group/day pair
+emm <- emmeans(model5, ~ group * day)
+
+# give p-value comparisons for each pair
+pairs(emm, simple = "each", adjust = "holm")
 ```
 
 ## Beta Diversity
@@ -699,6 +792,92 @@ JaccPlotF %>%
 ```
 
 Two main initial observations: First, relative abundance does not seem to be driving the differences between groups at all since bray-curtis and jaccard plots look pretty much identical. Future analyses that focus on presence/absence data might be more interesting than relative abundance data. Second, there seems to be some element of the beta diversity converging over time (I think). Still not sure what a good way to test this would be. *Maybe average distance to centroid over time?*
+
+### First and last timepoint
+
+These plots will just show the first and last timepoints, hopefully to help illustrate convergence and simplify figures for talks.
+
+```{r F beta div setup 1470, include = FALSE, warning = FALSE}
+# subset to first and last days
+WCF.1470 <- subset_samples(WCF.rare, day == "14" | day == "70")
+
+# bray curtis
+BrayDistF.1470 <- distance(WCF.1470, method = "bray") # create bray dist matrix
+BrayOrdF.1470 <- ordinate(WCF.1470, "NMDS", distance = BrayDistF.1470) # make NMDS ordination
+BrayPlotF.1470 <- plot_ordination(WCF.1470, BrayOrdF.1470, justDF = TRUE) # make base NMDS dataframe for plotting
+```
+
+Plots colored by group:  
+```{r F by group 1470, echo = FALSE}
+# bray curtis
+BrayPlotF.1470 %>%
+  ggplot(aes(x=NMDS1, y=NMDS2, color = group)) +
+  geom_point(size=4, aes(shape = day)) + sc +
+ # geom_line(aes(group = bird.code)) +
+#  stat_ellipse(aes(group = day)) +
+  stat_ellipse(aes(group = group)) +
+  labs(shape = "day") + 
+  ggtitle("Bray Curtis, days 14 and 70")
+```
+
+```{r F by group 1470 additive, include = FALSE}
+# additive plots for talks
+
+# PR only
+BrayPlotF.1470 %>%
+  ggplot(aes(x=NMDS1, y=NMDS2, color = group, alpha = group)) +
+  geom_point(size=4, aes(shape = day)) + sc +
+ # geom_line(aes(group = bird.code)) +
+#  stat_ellipse(aes(group = day)) +
+  stat_ellipse(aes(group = group)) +
+  labs(shape = "day") + 
+  scale_alpha_manual(values = c(0, 0, 1)) +
+  ggtitle("Bray Curtis, days 14 and 70")
+
+
+# PR and AR only
+BrayPlotF.1470 %>%
+  ggplot(aes(x=NMDS1, y=NMDS2, color = group, alpha = group)) +
+  geom_point(size=4, aes(shape = day)) + sc +
+ # geom_line(aes(group = bird.code)) +
+#  stat_ellipse(aes(group = day)) +
+  stat_ellipse(aes(group = group)) +
+  labs(shape = "day") + 
+  scale_alpha_manual(values = c(1, 0, 1)) +
+  ggtitle("Bray Curtis, days 14 and 70")
+```
+
+### Statistics (PERMANOVA) - all
+
+First I want to see if PERMANOVA identifies whether the composition is significant using the same model structure found for alpha diversity (group * day + sex + year), and including bird.code as a fixed effect because adonis2 cannot do random effects. I plan to move this to Primer7 eventually which should be able to handle random effects.
+
+```{r F adonis, echo = FALSE, warning = FALSE}
+# remove DI from the phyloseq
+WCF.noDI <- subset_samples(WCF.rare, group != "DI")
+
+# create new distance matrix
+BrayDistF.noDI <- distance(WCF.noDI, method = "bray") # create bray dist matrix
+
+# run adonis
+adonis2(BrayDistF.noDI ~ group * day + sex + year + bird.code, data = meta(WCF.noDI))
+```
+
+All terms are significant. 
+
+Next step will be post-hoc tests between each of the groups. For this I am using the pairwiseAdonis package.
+
+```{r F pairwise Adonis, echo = FALSE}
+# pairwise by group
+pairwise.adonis(BrayDistF.noDI, meta(WCF.noDI)$group)
+
+# pairwise by day
+pairwise.adonis(BrayDistF.noDI, meta(WCF.noDI)$day)
+
+# pairwise by year
+pairwise.adonis(BrayDistF.noDI, meta(WCF.noDI)$year)
+```
+
+The pairwise by day results give some more support to the idea of convergence.
 
 ### Venn diagram of shared taxa
 
@@ -806,9 +985,10 @@ Adding day as shape:
 ```{r T by group and day, echo = FALSE}
 # bray curtis
 BrayPlotT %>%
-  ggplot(aes(x=NMDS1, y=NMDS2)) + sc +
-  geom_point(size=4, aes(color = group, shape = day)) +
+  ggplot(aes(x=NMDS1, y=NMDS2, color = group)) + sc +
+  geom_point(size=4, aes(shape = day)) +
   labs(shape = "day") +
+  stat_ellipse(aes(group = group)) +
   ggtitle("Bray Curtis")
 
 # jaccard
@@ -819,7 +999,45 @@ JaccPlotT %>%
   ggtitle("Jaccard")
 ```
 
+```{r additive T by group and day, include = FALSE}
+# additive plots for talks
+
+# bray curtis PR only
+BrayPlotT %>%
+  ggplot(aes(x=NMDS1, y=NMDS2, color = group, alpha = group)) + sc +
+  geom_point(size=4, aes(shape = day)) +
+  labs(shape = "day") +
+  stat_ellipse(aes(group = group)) +
+  scale_alpha_manual(values = c(0, 0, 1)) +
+  ggtitle("Bray Curtis")
+
+# bray curtis PR and AR only
+BrayPlotT %>%
+  ggplot(aes(x=NMDS1, y=NMDS2, color = group, alpha = group)) + sc +
+  geom_point(size=4, aes(shape = day)) +
+  labs(shape = "day") +
+  stat_ellipse(aes(group = group)) +
+  scale_alpha_manual(values = c(1, 0, 1)) +
+  ggtitle("Bray Curtis")
+```
+
 This is a similar clustering pattern to what we saw with the fecal samples. Again, there are quite similar patterns between bray curtis and jaccard. There still seems to be an element of clustering over time!
+
+### Statistics (PERMANOVA) - all
+
+Next I want to see if PERMANOVA identifies whether the composition is significant using the same model structure found for alpha diversity (group * day + sex + year), and including bird.code as a fixed effect because adonis2 cannot do random effects. I plan to move this to Primer7 eventually which should be able to handle random effects.
+
+```{r T adonis, echo = FALSE, warning = FALSE}
+# run adonis
+adonis2(BrayDistT ~ group * day + sex + year + bird.code, data = meta(WCT.rare))
+```
+
+Next step will be post-hoc tests between each of the groups. For this I am using the pairwiseAdonis package.
+
+```{r T pairwise Adonis, echo = FALSE}
+# pairwise by group
+pairwise.adonis(BrayDistT, metaT.rare$group)
+```
 
 ### Venn diagram of shared taxa
 
