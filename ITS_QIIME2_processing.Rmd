@@ -1,0 +1,30 @@
+---
+title: "ITS QIIME2 processing"
+author: "Jess Diaz"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+This is the QIIME2 analysis for the Whooping Crane project ITS sequences. Many samples were sequenced a second time to correct for batch effects, and these will be identified by ending in -1 or -2 depending on the sequencing run it came from.
+
+There were two separate runs which together cover all tracheal samples from the cranes.  
+
+**Run 1**
+
+* Date: 09.25.2023
+* 62 total samples (124 total sequence files)
+  + 57 samples (including donor and inoculum)
+  + 3 extraction blanks
+  + 2 PCR negatives
+* 11 samples were resequenced at the core, including all blanks and negatives
+
+**Run 2**
+
+* Date: 07.29.2024
+* __ total samples (__ total sequence files)
+  + __ new samples
+  + __ repeated samples for batch effects correction
