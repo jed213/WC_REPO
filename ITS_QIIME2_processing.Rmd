@@ -6,10 +6,12 @@ output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(eval = FALSE)
 ```
 
 This is the QIIME2 analysis for the Whooping Crane project ITS sequences. Many samples were sequenced a second time to correct for batch effects, and these will be identified by ending in -1 or -2 depending on the sequencing run it came from.
+
+# Step 1: Organizing the data
 
 There were two separate runs which together cover all tracheal samples from the cranes.  
 
@@ -25,6 +27,198 @@ There were two separate runs which together cover all tracheal samples from the 
 **Run 2**
 
 * Date: 07.29.2024
-* __ total samples (__ total sequence files)
-  + __ new samples
-  + __ repeated samples for batch effects correction
+* 41 total samples (82 total sequence files)
+  + 13 new samples
+  + 20 repeated samples for batch effects correction
+  + 5 extraction blanks
+  + 2 PCR negatives
+  + Zymo community standard
+* All samples were resequenced at the core, including all blanks and negatives
+
+## Information about samples
+DNA from samples was run on Illumina Miseq using paired end reads using the ITS1F and ITS2R primers (see below for sequences). The data arrived from the sequencing facility in the form of fastq.gz files which are already demultiplexed, meaning the reads are already associated with the correct samples. 
+
+## ITS primers
+ITS1F: CTTGGTCATTTAGAGGAAGTAA  
+ITS2R: GCTGCGTTCTTCATCGATGC
+
+## Generate manifest file
+
+To import the files I needed to have a manifest file which associates each fastq.gz file with a sample name and whether it is a forward or reverse file. Instructions for this were in Elizabeth's *BaseSpace Protocol* Word Doc.  
+The final file name is called *ITS-manifest* and saved as a .csv. I then uploaded it to the cluster directory where the sequence files are.
+
+## Using QIIME2 in the cluster
+
+The following code is reference for loading qiime2 in the cluster and running an interactive job. I used Qiime2 version 2023.5.
+
+```{bash cluster setup}
+# load qiime2
+module load qiime2/2023.5
+
+# check it's working
+qiime --help
+
+# run interactive job
+srun --pty bash
+
+# submit normal job
+sbatch [job script]
+```
+
+# Step 2: Import data as a QIIME2 object
+
+```{bash}
+#### PAIRED
+
+# import paired end sequences into QIIME2
+qiime tools import \
+  --type "SampleData[PairedEndSequencesWithQuality]" \
+  --input-format PairedEndFastqManifestPhred33 \
+  --input-path seqs/ITS_manifest.csv \
+  --output-path paired-end-demux-ITS.qza
+  
+# make sure it ran correctly
+qiime tools peek paired-end-demux-ITS.qza
+```
+
+Moved the .qza file out of the seqs folder after.
+
+# Step 3: Assess sequence quality
+
+Based on whether you did paired or single end in Step 2, this will change the name of the data file referenced in this code.
+
+```{bash}
+# make plot of sequence quality
+qiime demux summarize \
+  --i-data paired-end-demux-ITS.qza \
+  --o-visualization demux_seqs_ITS.qzv
+```
+
+![Here is the sequence quality plot that resulted.]("plot_quality_ITS.png")
+
+# Step 4: Trim primers
+
+This step will trim both the forward and reverse primers from both reads, thus accounting for any potential readthrough sequencing. Primer in **p-front-f** becomes the reverse complement in **p-adapter-r**.
+
+```{bash}
+#### PAIRED
+
+# trim primer sequences from forward and reverse reads
+qiime cutadapt trim-paired \
+  --i-demultiplexed-sequences paired-end-demux-ITS.qza \
+  --p-adapter-f GCATCGATGAAGAACGCAGC \
+  --p-front-f CTTGGTCATTTAGAGGAAGTAA \
+  --p-adapter-r TTACTTCCTCTAAATGACCAAG \
+  --p-front-r GCTGCGTTCTTCATCGATGC \
+  --o-trimmed-sequences paired-end-demux-ITS-trimmed.qza
+  
+# make plot of sequence quality
+qiime demux summarize \
+  --i-data paired-end-demux-ITS-trimmed.qza \
+  --o-visualization demux_seqs_ITS_trimmed.qzv
+```
+
+![Here is the sequence quality plot that resulted after trimming.]("plot_quality_ITS_trimmed.png")
+
+After running this, I noticed it was weird that the sequence length still goes to 300 since they should have had at least the first adapter trimmed. It seems many of the reads did not get trimmed, likely because they might not have had a primer that matched the search criteria. I will next run the cutadapt command again, but including a flag that tells it to discard any reads that did not get trimmed.
+
+```{bash}
+#### PAIRED
+
+# trim primer sequences from forward and reverse reads
+qiime cutadapt trim-paired \
+  --i-demultiplexed-sequences paired-end-demux-ITS.qza \
+  --p-adapter-f GCATCGATGAAGAACGCAGC \
+  --p-front-f CTTGGTCATTTAGAGGAAGTAA \
+  --p-adapter-r TTACTTCCTCTAAATGACCAAG \
+  --p-front-r GCTGCGTTCTTCATCGATGC \
+  --p-discard-untrimmed \
+  --o-trimmed-sequences paired-demux-ITS-trimmed-discard.qza
+  
+# make plot of sequence quality
+qiime demux summarize \
+  --i-data paired-demux-ITS-trimmed-discard.qza \
+  --o-visualization demux_seqs_ITS_trimmed_discard.qzv
+```
+
+![Here is the sequence quality plot that resulted after trimming and discarding untrimmed reads.]("plot_quality_ITS_trimmed_discarded.png")
+
+In general this removed the sequences that went past 280, but there are still some stragglers especially in the reverse reads.
+
+I reran this same command with a **--verbose** flag to get some more information on what is happening. It indicated that most reads had detectable adapters and that only ~2% of reads were untrimmed and discarded. No reads were too short to use. I am still confused why there are reads extending past 280 bp in the quality plot.
+
+My next move is to add the flag **--p-max-n 281**. This will remove reads longer than 281 base pairs (I first ran this with 301 but the flag applies after trimming). It seems like I cannot use **-M** and **--too-long-output** in the QIIME2 cutadapt plugin which is unfortunate.
+
+```{bash}
+#### PAIRED
+
+# trim primer sequences from forward and reverse reads
+qiime cutadapt trim-paired \
+  --i-demultiplexed-sequences paired-end-demux-ITS.qza \
+  --p-adapter-f GCATCGATGAAGAACGCAGC \
+  --p-front-f CTTGGTCATTTAGAGGAAGTAA \
+  --p-adapter-r TTACTTCCTCTAAATGACCAAG \
+  --p-front-r GCTGCGTTCTTCATCGATGC \
+  --p-max-n 281 \
+  --p-discard-untrimmed \
+  --o-trimmed-sequences paired-demux-ITS-trimmed-discard-max281.qza
+  
+# make plot of sequence quality
+qiime demux summarize \
+  --i-data paired-demux-ITS-trimmed-discard-max281.qza \
+  --o-visualization demux_seqs_ITS_trimmed_discard_max281.qzv
+```
+
+Somehow, this still left me with quality plots that look exactly like the ones before - there are still stragglers after 280bp so I guess the trimming did not work? Two avenues next - I can try with a decimal instead of actual read count parameter. I can also try to trim in two steps - it seems people report this leads to different results and that cutadapt performs better in stages.
+
+```{bash}
+#### PAIRED
+
+# trim primer sequences from forward and reverse reads
+qiime cutadapt trim-paired \
+  --i-demultiplexed-sequences paired-end-demux-ITS.qza \
+  --p-adapter-f GCATCGATGAAGAACGCAGC \
+  --p-front-f CTTGGTCATTTAGAGGAAGTAA \
+  --p-adapter-r TTACTTCCTCTAAATGACCAAG \
+  --p-front-r GCTGCGTTCTTCATCGATGC \
+  --p-max-n 1 \
+  --p-discard-untrimmed \
+  --o-trimmed-sequences paired-demux-ITS-trimmed-discard-max1.qza
+  
+# make plot of sequence quality
+qiime demux summarize \
+  --i-data paired-demux-ITS-trimmed-discard-max1.qza \
+  --o-visualization demux_seqs_ITS_trimmed_discard_max1.qzv
+```
+
+This led to the same outcome. Next trying the piece wise method.
+
+```{bash}
+#### PAIRED
+
+# trim front sequences
+qiime cutadapt trim-paired \
+  --i-demultiplexed-sequences paired-end-demux-ITS.qza \
+  --p-front-f CTTGGTCATTTAGAGGAAGTAA \
+  --p-front-r GCTGCGTTCTTCATCGATGC \
+  --p-discard-untrimmed \
+  --o-trimmed-sequences paired-demux-ITS-front-trim.qza
+  
+# trim adapter sequences
+qiime cutadapt trim-paired \
+  --i-demultiplexed-sequences paired-demux-ITS-front-trim.qza \
+  --p-adapter-f GCATCGATGAAGAACGCAGC \
+  --p-adapter-r TTACTTCCTCTAAATGACCAAG \
+  --o-trimmed-sequences paired-demux-ITS-adapter-trim.qza
+  
+# make plot of sequence quality
+qiime demux summarize \
+  --i-data paired-demux-ITS-adapter-trim.qza \
+  --o-visualization demux_seqs_ITS_trimmed_piecewise.qzv
+```
+
+This worked!! It now looks like it has been trimmed correctly.
+
+![Here is the sequence quality plot that resulted after processing through two steps.]("plot_quality_ITS_trimmed_piecewise.png")
+
+# Step 5: Run DADA2 (trim for quality, denoise, merge, remove chimeras)
