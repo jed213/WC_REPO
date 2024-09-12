@@ -222,3 +222,57 @@ This worked!! It now looks like it has been trimmed correctly.
 ![Here is the sequence quality plot that resulted after processing through two steps.]("plot_quality_ITS_trimmed_piecewise.png")
 
 # Step 5: Run DADA2 (trim for quality, denoise, merge, remove chimeras)
+
+I plan to test multiple truncation lengths to see what length will retain the most sequences.
+
+I will test: 
+
+240F, 200R  
+260F, 220R  
+260F, 200R
+
+```{bash}
+# run DADA2 on paired reads, 240F 200R truncation
+qiime dada2 denoise-paired \
+  --i-demultiplexed-seqs paired-demux-ITS-adapter-trim.qza \
+  --p-n-threads 0 \
+  --p-trunc-len-f 240 \
+  --p-trunc-len-r 200 \
+  --o-table table-ITS-240200.qza \
+  --o-representative-sequences rep-seqs-ITS-240200.qza \
+  --o-denoising-stats denoising-stats-ITS-240200.qza
+  
+# run DADA2 on paired reads, 260F 220R truncation
+qiime dada2 denoise-paired \
+  --i-demultiplexed-seqs paired-demux-ITS-adapter-trim.qza \
+  --p-n-threads 0 \
+  --p-trunc-len-f 260 \
+  --p-trunc-len-r 220 \
+  --o-table table-ITS-260220.qza \
+  --o-representative-sequences rep-seqs-ITS-260220.qza \
+  --o-denoising-stats denoising-stats-ITS-260220.qza
+  
+# run DADA2 on paired reads, 260F 200R truncation
+qiime dada2 denoise-paired \
+  --i-demultiplexed-seqs paired-demux-ITS-adapter-trim.qza \
+  --p-n-threads 0 \
+  --p-trunc-len-f 260 \
+  --p-trunc-len-r 200 \
+  --o-table table-ITS-260200.qza \
+  --o-representative-sequences rep-seqs-ITS-260200.qza \
+  --o-denoising-stats denoising-stats-ITS-260200.qza
+  
+# visualize DADA2 filtering steps
+qiime metadata tabulate \
+  --m-input-file denoising-stats-ITS-240200.qza \
+  --o-visualization denoising_stats_ITS_240200.qzv
+qiime metadata tabulate \
+  --m-input-file denoising-stats-ITS-260220.qza \
+  --o-visualization denoising_stats_ITS_260220.qzv
+qiime metadata tabulate \
+  --m-input-file denoising-stats-ITS-260200.qza \
+  --o-visualization denoising_stats_ITS_260200.qzv
+```
+
+
+
